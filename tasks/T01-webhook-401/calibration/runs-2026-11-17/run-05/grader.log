@@ -1,0 +1,16 @@
+test_a1_ascii_accepted (grader.test_grader.T01) ... ok
+test_a2_non_ascii_accepted_and_stored_intact (grader.test_grader.T01) ... ok
+test_a3_compact_json_accepted (grader.test_grader.T01) ... ok
+test_a4_tampered_body_rejected (grader.test_grader.T01) ... signature mismatch len=173
+ok
+test_a5_wrong_secret_rejected (grader.test_grader.T01) ... signature mismatch len=173
+ok
+test_a6_stale_timestamp_rejected (grader.test_grader.T01) ... stale webhook skew=401s
+ok
+test_a7_missing_signature_rejected (grader.test_grader.T01) ... signature mismatch len=173
+ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.510s
+
+OK

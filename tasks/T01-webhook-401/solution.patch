@@ -1,0 +1,45 @@
+diff -ru a/service/mes_webhook.py b/service/mes_webhook.py
+--- a/service/mes_webhook.py	2026-11-17 09:10:44
++++ b/service/mes_webhook.py	2026-11-17 09:10:44
+@@ -37,12 +37,6 @@
+             return self._reply(404, {"error": "not found"})
+ 
+         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+-        try:
+-            event = parse_event(raw)
+-        except ValueError as exc:
+-            log.warning("bad payload: %s", exc)
+-            return self._reply(400, {"error": "bad payload"})
+-
+         ts = self.headers.get("X-MES-Timestamp", "")
+         sig = self.headers.get("X-MES-Signature", "")
+         try:
+@@ -50,16 +44,22 @@
+         except ValueError:
+             return self._reply(401, {"error": "bad timestamp"})
+         if skew > 1:
+-            log.warning("clock skew %.1fs plant=%s", skew, event.get("plant"))
++            log.warning("clock skew %.1fs", skew)
+         if skew > TOLERANCE_S:
+-            log.error("stale webhook event_id=%s skew=%.0fs", event["event_id"], skew)
++            log.error("stale webhook skew=%.0fs", skew)
+             return self._reply(401, {"error": "stale"})
+ 
+-        # Normalise before verifying so whitespace differences from the vendor don't matter.
+-        canonical = json.dumps(event).encode()
+-        if not hmac.compare_digest(sig, expected_signature(ts, canonical)):
+-            log.error("signature mismatch event_id=%s plant=%s", event["event_id"], event.get("plant"))
++        # Verify over the raw bytes as sent: re-serialising parsed JSON changes them
++        # (json.dumps escapes non-ASCII), so the vendor's HMAC would never match.
++        if not hmac.compare_digest(sig, expected_signature(ts, raw)):
++            log.error("signature mismatch")
+             return self._reply(401, {"error": "bad signature"})
++
++        try:
++            event = parse_event(raw)
++        except ValueError as exc:
++            log.warning("bad payload: %s", exc)
++            return self._reply(400, {"error": "bad payload"})
+ 
+         RECEIVED.append(event)
+         log.info("accepted event_id=%s type=%s plant=%s", event["event_id"], event["type"], event.get("plant"))

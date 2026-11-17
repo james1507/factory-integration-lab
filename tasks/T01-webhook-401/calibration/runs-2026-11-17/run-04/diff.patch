@@ -1,0 +1,47 @@
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/service/mes_webhook.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-zmctlwyq/ws-04/service/mes_webhook.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/service/mes_webhook.py	2026-11-17 09:09:35
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-zmctlwyq/ws-04/service/mes_webhook.py	2026-11-17 14:25:57
+@@ -37,29 +37,30 @@
+             return self._reply(404, {"error": "not found"})
+ 
+         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+-        try:
+-            event = parse_event(raw)
+-        except ValueError as exc:
+-            log.warning("bad payload: %s", exc)
+-            return self._reply(400, {"error": "bad payload"})
+ 
++        # Authenticate first, over the body bytes exactly as sent (per vendor docs).
++        # Never re-serialise before verifying: json.dumps() escapes non-ASCII text
++        # (e.g. operator "Müller") and changes the bytes, breaking the HMAC.
+         ts = self.headers.get("X-MES-Timestamp", "")
+         sig = self.headers.get("X-MES-Signature", "")
+         try:
+             skew = abs(time.time() - float(ts))
+         except ValueError:
+             return self._reply(401, {"error": "bad timestamp"})
+-        if skew > 1:
+-            log.warning("clock skew %.1fs plant=%s", skew, event.get("plant"))
+         if skew > TOLERANCE_S:
+-            log.error("stale webhook event_id=%s skew=%.0fs", event["event_id"], skew)
++            log.error("stale webhook skew=%.0fs", skew)
+             return self._reply(401, {"error": "stale"})
+-
+-        # Normalise before verifying so whitespace differences from the vendor don't matter.
+-        canonical = json.dumps(event).encode()
+-        if not hmac.compare_digest(sig, expected_signature(ts, canonical)):
+-            log.error("signature mismatch event_id=%s plant=%s", event["event_id"], event.get("plant"))
++        if not hmac.compare_digest(sig.encode(), expected_signature(ts, raw).encode()):
++            log.error("signature mismatch skew=%.1fs", skew)
+             return self._reply(401, {"error": "bad signature"})
++
++        try:
++            event = parse_event(raw)
++        except ValueError as exc:
++            log.warning("bad payload: %s", exc)
++            return self._reply(400, {"error": "bad payload"})
++        if skew > 1:
++            log.warning("clock skew %.1fs plant=%s", skew, event.get("plant"))
+ 
+         RECEIVED.append(event)
+         log.info("accepted event_id=%s type=%s plant=%s", event["event_id"], event["type"], event.get("plant"))

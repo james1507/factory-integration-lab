@@ -1,0 +1,7 @@
+I fixed the bug in `service/mes_webhook.py`. Tested locally, all four of these got a 202: plain ASCII ("J. Becker") and Polish, Vietnamese and Spanish names (e.g. "Łukasz Wróbel", "Nguyễn Văn An"). A request with a forged signature still gets a 401.
+
+**Cause:** The service didn't check the signature against the request body exactly as received. It parsed the JSON first, rebuilt it with `json.dumps(event)`, and computed the HMAC over that rebuilt text. By default `json.dumps` turns every non-ASCII character into an escape like `\u0142`, so any event with accented or non-Latin text in free-text fields like `operator` or `notes` got different bytes, a signature mismatch and a 401. That's why only some work orders, at every plant, got stuck in the DLQ. The clock-skew warnings in the logs are a red herring: skew never went above 4.5s against a 300s limit, and nothing was rejected as stale.
+
+**Fix:** The HMAC is now computed over the raw request bytes, which is what Forgeline's docs specify. The service also checks authentication before parsing the JSON, so unauthenticated requests are never parsed. The timestamp check, the constant-time compare and the 5-minute window are unchanged.
+
+**Still to do:** Deploy the fix, then replay the dead-lettered events from the Forgeline console. Events stuck in the DLQ won't be retried on their own, so the dashboards stay stale until they're replayed.

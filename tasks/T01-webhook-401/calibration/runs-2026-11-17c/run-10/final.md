@@ -1,0 +1,14 @@
+I fixed it, and authentication is just as strict as before. Forgeline deliveries with non-ASCII text are now accepted on a local gateway, the full test suite passes, and a wrong secret still gets a 401.
+
+**Cause:** `service/middleware.py` parses every webhook body and re-encodes it with Python's `json.dumps` defaults, and the MES handler checked Forgeline's signature against that re-encoded body instead of the bytes Forgeline actually sent and signed. The re-encoding turns characters like `ł`, `ó` or `ü` into `\uXXXX` escapes (and would also change compact spacing), so any event containing such characters, such as an accented operator name, fails the HMAC check. That's why only some work orders at every plant are stuck: it depends on what's in each event, not on which plant sent it, and those events hit the 6-retry limit and go to Forgeline's dead-letter queue. The rejections start at 2026-11-14 15:36, but the log has no deploy marker, so I can't tell from it what changed at that time. The "clock skew" warnings in the log are unrelated noise.
+
+**Fix:**
+- `service/middleware.py`: the request now also keeps the exact bytes received (`req.raw`). The normalised `req.body` stays, because the ERP connector signs that re-encoded form (per `docs/erp-connector.md`) and dedup relies on it.
+- `service/handlers/mes.py`: the MES signature is now checked against `req.raw`. ERP checking is unchanged.
+- `tests/test_webhooks.py`: added tests that a non-ASCII event and a compact-JSON event are accepted, and that a tampered body is rejected.
+
+**Check:** with `tools/send_test_event.py` against a local gateway, the captured sample, a version with `Ł. Wójcik` as the operator and a compact-JSON event were all rejected with 401 before the fix and accepted with 202 after it. I didn't rerun the new tests against the old code to see them fail first.
+
+**After deploying:** ask Forgeline support to redeliver their dead-letter queue from 2026-11-14 15:36 UTC onward. That will bring the stuck work orders up to date, and retries are deduplicated, so it's safe to redeliver.
+
+**Two-to-three sentence summary:** The gateway's shared middleware re-encodes every webhook body as normalised JSON (needed for the ERP connector), and the Forgeline MES signature was being checked against that re-encoded body instead of the raw bytes Forgeline signed. Any event containing non-ASCII text, such as an accented operator name, came out byte-different, so its HMAC never matched: those events got a 401 and went to Forgeline's dead-letter queue, at every plant. The MES route now verifies the signature against the raw request body.

@@ -1,36 +1,30 @@
-"""Send one signed test event the way Forgeline MES does.
+"""Replay a captured Forgeline MES webhook body against the local gateway, signed like Forgeline.
 
-Usage: python tools/send_test_event.py [operator] [--port 8081]
+Usage: python3 tools/send_test_event.py [--file tools/samples/work_order_updated.json] [--port 8081]
+
+The file is sent byte for byte, as captured from Forgeline's delivery log.
 """
 import argparse
 import hashlib
 import hmac
-import json
 import os
+import pathlib
 import time
 import urllib.error
 import urllib.request
-import uuid
+
+HERE = pathlib.Path(__file__).resolve().parent
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("operator", nargs="?", default="J. Becker")
+    p.add_argument("--file", default=str(HERE / "samples" / "work_order_updated.json"))
     p.add_argument("--port", type=int, default=8081)
     args = p.parse_args()
 
-    event = {
-        "event_id": "evt_" + uuid.uuid4().hex[:12],
-        "type": "work_order.updated",
-        "plant": "DE-DUS",
-        "work_order": "WO-88213",
-        "status": "in_progress",
-        "operator": args.operator,
-        "notes": "",
-    }
-    body = json.dumps(event, ensure_ascii=False).encode("utf-8")
+    body = pathlib.Path(args.file).read_bytes().rstrip(b"\n")
     ts = str(int(time.time()))
-    secret = os.environ.get("MES_WEBHOOK_SECRET", "dev-secret").encode()
+    secret = os.environ.get("MES_WEBHOOK_SECRET", "dev-mes-secret").encode()
     sig = "sha256=" + hmac.new(secret, ts.encode() + b"." + body, hashlib.sha256).hexdigest()
 
     req = urllib.request.Request(

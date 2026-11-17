@@ -1,0 +1,92 @@
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/service/handlers/mes.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-06/service/handlers/mes.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/service/handlers/mes.py	2026-11-17 14:40:18
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-06/service/handlers/mes.py	2026-11-17 14:44:01
+@@ -11,7 +11,7 @@
+ def handle(req):
+     data = req.data if isinstance(req.data, dict) else {}
+     try:
+-        skew = signing.verify_mes(req.headers, req.body)
++        skew = signing.verify_mes(req.headers, req.raw)
+     except signing.AuthError as exc:
+         if str(exc) == "bad signature":
+             log.error("signature mismatch event_id=%s plant=%s", data.get("event_id"), data.get("plant"))
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/service/middleware.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-06/service/middleware.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/service/middleware.py	2026-11-17 14:40:17
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-06/service/middleware.py	2026-11-17 14:44:01
+@@ -9,10 +9,11 @@
+ 
+ 
+ class Request:
+-    def __init__(self, path, headers, body, data):
++    def __init__(self, path, headers, body, data, raw=b""):
+         self.path = path
+         self.headers = headers
+-        self.body = body  # normalised JSON bytes
++        self.raw = raw  # exact bytes received; sign/verify these unless a connector says otherwise
++        self.body = body  # normalised JSON bytes (dedup, audit, ERP signature)
+         self.data = data  # parsed JSON
+ 
+ 
+@@ -22,13 +23,15 @@
+         raise BadRequest("body too large")
+     raw = handler.rfile.read(length)
+     if not raw:
+-        return Request(handler.path, handler.headers, b"", None)
++        return Request(handler.path, handler.headers, b"", None, raw)
+     try:
+         data = json.loads(raw)
+     except ValueError as exc:
+         raise BadRequest("invalid JSON: %s" % exc)
+ 
+     # Connectors send pretty-printed JSON with CRLFs (ERP) or compact JSON (MES).
+-    # Re-encode once so signature checks, dedup hashes and audit logs all see one form.
++    # Re-encode once so dedup hashes and audit logs see one form. Only the ERP
++    # connector signs this re-encoded form (docs/erp-connector.md); MES signs the
++    # wire bytes, so its handler must verify `raw`, not `body`.
+     body = json.dumps(data).encode()
+-    return Request(handler.path, handler.headers, body, data)
++    return Request(handler.path, handler.headers, body, data, raw)
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/service/signing.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-06/service/signing.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/service/signing.py	2026-11-17 14:40:18
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-06/service/signing.py	2026-11-17 14:44:05
+@@ -24,7 +24,10 @@
+ 
+ 
+ def verify_mes(headers, body):
+-    """Forgeline MES: X-MES-Signature = "sha256=" + hex HMAC(secret, timestamp + "." + body)."""
++    """Forgeline MES: X-MES-Signature = "sha256=" + hex HMAC(secret, timestamp + "." + body).
++
++    `body` must be the exact bytes received on the wire, not a re-encoding.
++    """
+     ts = headers.get("X-MES-Timestamp")
+     skew = check_timestamp(ts)
+     mac = hmac.new(config.MES_SECRET, ts.encode() + b"." + body, hashlib.sha256)
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-06/tests/test_webhooks.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py	2026-11-17 14:40:44
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-06/tests/test_webhooks.py	2026-11-17 14:44:09
+@@ -63,6 +63,25 @@
+         self.mes_post(e)
+         self.assertEqual(self.mes_post(e), (202, {"status": "duplicate"}))
+ 
++    def test_mes_signs_wire_bytes(self):
++        # Forgeline signs the exact bytes it sends: UTF-8, not \u-escaped, any separators.
++        for kwargs in ({"ensure_ascii": False}, {"separators": (",", ":")}):
++            e = dict(self.mes_event(), plant="VN-BD", operator="Nguyễn Văn An")
++            body = json.dumps(e, **kwargs).encode()
++            ts = str(int(time.time()))
++            sig = "sha256=" + hmac.new(MES, ts.encode() + b"." + body, hashlib.sha256).hexdigest()
++            status, _ = self.request("POST", "/webhooks/mes", body, {"X-MES-Timestamp": ts, "X-MES-Signature": sig})
++            self.assertEqual(status, 202, kwargs)
++
++    def test_mes_tampered_body_rejected(self):
++        e = self.mes_event()
++        body = json.dumps(e).encode()
++        ts = str(int(time.time()))
++        sig = "sha256=" + hmac.new(MES, ts.encode() + b"." + body, hashlib.sha256).hexdigest()
++        tampered = body.replace(b'"WO-1"', b'"WO-2"')
++        status, _ = self.request("POST", "/webhooks/mes", tampered, {"X-MES-Timestamp": ts, "X-MES-Signature": sig})
++        self.assertEqual(status, 401)
++
+     def test_mes_wrong_secret_rejected(self):
+         self.assertEqual(self.mes_post(self.mes_event(), secret=b"nope")[0], 401)
+ 

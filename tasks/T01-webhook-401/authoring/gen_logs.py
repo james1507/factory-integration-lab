@@ -27,6 +27,9 @@ NOISE = [
     "INFO scheduler job=sync_shift_calendar status=ok",
     "WARNING urllib3.connectionpool Retrying (Retry(total=2)) after connection broken by 'ReadTimeoutError' /api/v2/shifts",
     "INFO metrics flush series=%d",
+    "INFO erp_webhook accepted doc_id=SO-1%05d type=sales_order.updated",
+    "INFO erp_webhook accepted doc_id=MAT-%d type=material.stock_changed",
+    "INFO erp_webhook accepted doc_id=SO-1%05d type=sales_order.created",
 ]
 
 
@@ -51,12 +54,12 @@ def main():
         out.append("%s,%03d %s" % (t.strftime("%Y-%m-%d %H:%M:%S"), t.microsecond // 1000, msg))
 
     if args.deploy_marker:
-        emit("INFO mes_webhook starting version=1.7.4 port=8081")
+        emit("INFO gateway listening on 127.0.0.1:8081 version=1.7.4")
     for i in range(args.lines):
         t += dt.timedelta(seconds=rnd.randint(1, 9))
         if i == deploy_at and args.deploy_marker:
-            emit("INFO mes_webhook shutting down (SIGTERM)")
-            emit("INFO mes_webhook starting version=1.8.0 port=8081")
+            emit("INFO gateway shutting down (SIGTERM)")
+            emit("INFO gateway listening on 127.0.0.1:8081 version=1.8.0")
             continue
         if i == deploy_at + 400 and args.skew_herring:
             emit("WARNING ops.ntp chrony on vn-bd-gw01 stepped clock by -3.8s")

@@ -22,6 +22,16 @@ TASK = ROOT / "tasks" / "T01-webhook-401"
 OUT = ROOT / "docs" / "assets"
 FONT = "font-family='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace'"
 SANS = "font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif'"
+# Plausible wrong fixes; each must FAIL the grader. (label, file in env/, old text, new text)
+CONTROLS = [
+    ("narrow fix: ensure_ascii=False in middleware", "service/middleware.py",
+     "body = json.dumps(data).encode()", "body = json.dumps(data, ensure_ascii=False).encode()"),
+    ("global fix: middleware passes raw bytes to all routes", "service/middleware.py",
+     "body = json.dumps(data).encode()", "body = raw"),
+    ("bypass: MES signature check removed", "service/signing.py",
+     'if not hmac.compare_digest(headers.get("X-MES-Signature", ""), "sha256=" + mac.hexdigest()):',
+     "if False:"),
+]
 INK, MUTED, GRID, OK, BAD, BAND = "#1f2328", "#59636e", "#d1d9e0", "#4a72b0", "#cf222e", "#dafbe1"
 
 
@@ -87,7 +97,8 @@ def calibration():
         batches.append((f.parent.name.replace("runs-", ""), d["pass_automated"], d["total"],
                         min(r["turns"] for r in runs), max(r["turns"] for r in runs),
                         sum(r["cost_usd"] for r in runs)))
-    labels = {"2026-11-17": "Batch A: default knobs", "2026-11-17b": "Batch B: no docs, 23k log lines"}
+    labels = {"2026-11-17": "Batch A: default knobs", "2026-11-17b": "Batch B: no docs, 23k log lines",
+              "2026-11-17c": "Batch C: gateway v2, ERP trap"}
     W, L, R, T, rowh = 900, 250, 40, 70, 56
     H = T + rowh * len(batches) + 50
     span = W - L - R
@@ -108,7 +119,7 @@ def calibration():
         parts.append("<rect x='%d' y='%d' width='%.1f' height='22' fill='%s' rx='3'/>" % (
             L, y + 8, ok / tot * span, OK))
         parts.append(text(L + ok / tot * span - 8, y + 24, "%d/%d pass" % (ok, tot), 12, "#ffffff", "end", "600"))
-    parts.append(text(24, H - 12, "Verdict: too easy at both settings. Next lever is code size, not log size.", 12, BAD, weight="600"))
+    parts.append(text(24, H - 12, "Verdict: too easy at all three settings (30/30). Harder tasks need new bug classes, not more decoys.", 12, BAD, weight="600"))
     save("t01-calibration.svg", W, H, "".join(parts))
 
 
@@ -149,17 +160,12 @@ def validate_output():
                 l.strip() for l in out[i + 1:] if l.strip() in ("ok", "FAIL", "ERROR"))
             s = "%-46s %s" % (re.sub(r" \(.*", "", s), status)
             lines.append((s, "#7ee787" if status == "ok" else "#ff7b72"))
-    controls = [
-        ("narrow fix: json.dumps(event, ensure_ascii=False)",
-         "canonical = json.dumps(event).encode()", "canonical = json.dumps(event, ensure_ascii=False).encode()"),
-        ("bypass: signature check removed",
-         "if not hmac.compare_digest(sig, expected_signature(ts, canonical)):", "if False:"),
-    ]
-    for label, old, new in controls:
+    for label, rel, old, new in CONTROLS:
         with tempfile.TemporaryDirectory() as tmp:
             env = pathlib.Path(tmp) / "env"
             shutil.copytree(TASK / "env", env)
-            f = env / "service" / "mes_webhook.py"
+            f = env / rel
+            assert old in f.read_text(), "negative control no longer applies: " + label
             f.write_text(f.read_text().replace(old, new))
             r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(TASK), "--candidate", str(env)],
                                capture_output=True, text=True, cwd=str(ROOT))
@@ -171,7 +177,7 @@ def validate_output():
     terminal("t01-validate.svg", "validate.py: broken env, reference fix, negative controls", lines)
 
 
-def agent_run(run="runs-2026-11-17b/run-03"):
+def agent_run(run="runs-2026-11-17c/run-03"):
     d = TASK / "calibration" / run
     lines = [("$ claude -p \"$(cat prompt.md)\"   # %s, fresh copy of env/" % run, "#79c0ff")]
     for raw in (d / "transcript.jsonl").read_text().splitlines():
@@ -202,7 +208,7 @@ def agent_run(run="runs-2026-11-17b/run-03"):
     lines += [(s, "#c9d1d9") for s in wrapped[:9]]
     grader = (d / "grader.log").read_text()
     lines.append(("", INK))
-    lines.append(("grader: %s" % ("PASS (7/7 checks)" if "OK" in grader.splitlines()[-1] else "FAIL"), "#7ee787"))
+    lines.append(("grader: %s" % ("PASS (all grader checks)" if "OK" in grader.splitlines()[-1] else "FAIL"), "#7ee787"))
     terminal("t01-agent-run.svg", "One recorded agent run (tool calls, answer, grade)", lines)
 
 

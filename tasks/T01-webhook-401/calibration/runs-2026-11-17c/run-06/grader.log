@@ -1,0 +1,19 @@
+test_a1_ascii_accepted (grader.test_grader.T01) ... ok
+test_a2_non_ascii_accepted_and_stored_intact (grader.test_grader.T01) ... ok
+test_a3_compact_json_accepted (grader.test_grader.T01) ... ok
+test_a4_tampered_body_rejected (grader.test_grader.T01) ... signature mismatch event_id=evt_grader_f52dc920549a plant=DE-DUS
+ok
+test_a5_wrong_secret_rejected (grader.test_grader.T01) ... signature mismatch event_id=evt_grader_2723f64130a7 plant=DE-DUS
+ok
+test_a6_stale_timestamp_rejected (grader.test_grader.T01) ... rejected event_id=evt_grader_66bd90e0e057: stale (skew=400s)
+ok
+test_a7_missing_signature_rejected (grader.test_grader.T01) ... signature mismatch event_id=evt_grader_c4ec40221b0f plant=DE-DUS
+ok
+test_a8_erp_non_ascii_pretty_printed_accepted (grader.test_grader.T01) ... ok
+test_a9_erp_wrong_secret_rejected (grader.test_grader.T01) ... rejected doc_id=SO-1: bad signature
+ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.512s
+
+OK

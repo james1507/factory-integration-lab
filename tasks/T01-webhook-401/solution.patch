@@ -1,45 +1,40 @@
-diff -ru a/service/mes_webhook.py b/service/mes_webhook.py
---- a/service/mes_webhook.py	2026-11-17 09:10:44
-+++ b/service/mes_webhook.py	2026-11-17 09:10:44
-@@ -37,12 +37,6 @@
-             return self._reply(404, {"error": "not found"})
+diff -ru a/service/handlers/mes.py b/service/handlers/mes.py
+--- a/service/handlers/mes.py	2026-11-17 14:41:25
++++ b/service/handlers/mes.py	2026-11-17 14:41:25
+@@ -11,7 +11,8 @@
+ def handle(req):
+     data = req.data if isinstance(req.data, dict) else {}
+     try:
+-        skew = signing.verify_mes(req.headers, req.body)
++        # Forgeline signs the body exactly as sent, not our re-encoded copy.
++        skew = signing.verify_mes(req.headers, req.raw)
+     except signing.AuthError as exc:
+         if str(exc) == "bad signature":
+             log.error("signature mismatch event_id=%s plant=%s", data.get("event_id"), data.get("plant"))
+diff -ru a/service/middleware.py b/service/middleware.py
+--- a/service/middleware.py	2026-11-17 14:41:25
++++ b/service/middleware.py	2026-11-17 14:41:25
+@@ -9,11 +9,12 @@
  
-         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
--        try:
--            event = parse_event(raw)
--        except ValueError as exc:
--            log.warning("bad payload: %s", exc)
--            return self._reply(400, {"error": "bad payload"})
--
-         ts = self.headers.get("X-MES-Timestamp", "")
-         sig = self.headers.get("X-MES-Signature", "")
-         try:
-@@ -50,16 +44,22 @@
-         except ValueError:
-             return self._reply(401, {"error": "bad timestamp"})
-         if skew > 1:
--            log.warning("clock skew %.1fs plant=%s", skew, event.get("plant"))
-+            log.warning("clock skew %.1fs", skew)
-         if skew > TOLERANCE_S:
--            log.error("stale webhook event_id=%s skew=%.0fs", event["event_id"], skew)
-+            log.error("stale webhook skew=%.0fs", skew)
-             return self._reply(401, {"error": "stale"})
  
--        # Normalise before verifying so whitespace differences from the vendor don't matter.
--        canonical = json.dumps(event).encode()
--        if not hmac.compare_digest(sig, expected_signature(ts, canonical)):
--            log.error("signature mismatch event_id=%s plant=%s", event["event_id"], event.get("plant"))
-+        # Verify over the raw bytes as sent: re-serialising parsed JSON changes them
-+        # (json.dumps escapes non-ASCII), so the vendor's HMAC would never match.
-+        if not hmac.compare_digest(sig, expected_signature(ts, raw)):
-+            log.error("signature mismatch")
-             return self._reply(401, {"error": "bad signature"})
-+
-+        try:
-+            event = parse_event(raw)
-+        except ValueError as exc:
-+            log.warning("bad payload: %s", exc)
-+            return self._reply(400, {"error": "bad payload"})
+ class Request:
+-    def __init__(self, path, headers, body, data):
++    def __init__(self, path, headers, body, data, raw=b""):
+         self.path = path
+         self.headers = headers
+         self.body = body  # normalised JSON bytes
+         self.data = data  # parsed JSON
++        self.raw = raw  # bytes exactly as received; what senders that sign the wire sign
  
-         RECEIVED.append(event)
-         log.info("accepted event_id=%s type=%s plant=%s", event["event_id"], event["type"], event.get("plant"))
+ 
+ def read_request(handler):
+@@ -29,6 +30,7 @@
+         raise BadRequest("invalid JSON: %s" % exc)
+ 
+     # Connectors send pretty-printed JSON with CRLFs (ERP) or compact JSON (MES).
+-    # Re-encode once so signature checks, dedup hashes and audit logs all see one form.
++    # Re-encode once so dedup hashes and audit logs see one form. Only connectors that sign
++    # this re-encoded form (ERP) may verify against it; json.dumps escapes non-ASCII text.
+     body = json.dumps(data).encode()
+-    return Request(handler.path, handler.headers, body, data)
++    return Request(handler.path, handler.headers, body, data, raw)

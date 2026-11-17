@@ -1,0 +1,157 @@
+{
+  "task": "T01-webhook-401",
+  "runs": [
+    {
+      "run": 1,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.34952059999999996,
+      "turns": 9,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-01/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    },
+    {
+      "run": 2,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.28485299999999997,
+      "turns": 7,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-02/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    },
+    {
+      "run": 3,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.26197539999999997,
+      "turns": 6,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-03/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    },
+    {
+      "run": 4,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.3909666,
+      "turns": 9,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-04/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    },
+    {
+      "run": 5,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.3217564,
+      "turns": 8,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-05/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    },
+    {
+      "run": 6,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.32271360000000004,
+      "turns": 10,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-06/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    },
+    {
+      "run": 7,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.34077260000000004,
+      "turns": 9,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-07/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    },
+    {
+      "run": 8,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.3266718,
+      "turns": 8,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-08/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    },
+    {
+      "run": 9,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.270914,
+      "turns": 6,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-09/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    },
+    {
+      "run": 10,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.3576484,
+      "turns": 9,
+      "leak_markers": [],
+      "touched_outside_service": [
+        "diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T01-webhook-401/env/tests/test_webhooks.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-986znbg_/ws-10/tests/test_webhooks.py"
+      ],
+      "compare_digest_kept": true,
+      "failed_checks": []
+    }
+  ],
+  "pass_automated": 10,
+  "total": 10
+}

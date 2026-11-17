@@ -12,14 +12,14 @@ Each task drops an agent into an incident the way an on-call engineer meets it: 
 
 | What was executed | Result | Evidence |
 |---|---|---|
-| Task self-check: hidden grader on broken env vs. reference fix | broken **FAIL**, fixed **PASS** (visible tests also green) | [negative controls](#negative-controls), `scripts/validate.py` |
-| Negative controls: narrow fix, global fix that breaks another connector, auth bypass | all three **FAIL** on the intended checks | same |
-| Calibration batch A: Claude Code, `claude-opus-5-5`, v1 env, default knobs | **10/10 pass**, 4–10 turns, $2.10 | [`runs-2026-11-17/`](tasks/T01-webhook-401/calibration/runs-2026-11-17) |
-| Calibration batch B: v1 env, vendor docs removed, 23k-line log | **10/10 pass**, 5–9 turns, $2.15 | [`runs-2026-11-17b/`](tasks/T01-webhook-401/calibration/runs-2026-11-17b) |
-| Calibration batch C: v2 env, multi-module gateway with a cross-connector trap | **10/10 pass**, 6–10 turns, $3.23 | [`runs-2026-11-17c/`](tasks/T01-webhook-401/calibration/runs-2026-11-17c) |
-| Answer-leak and hard-fail scan over all 30 transcripts and diffs | 0 leaks, 0 hard fails | `summary.json` in each batch |
+| T01 and T02 self-check: hidden grader on broken env vs. reference fix | broken **FAIL**, fixed **PASS** (visible tests also green) | `validate.py --controls`, [T01](#negative-controls), [T02](#t02-negative-controls) |
+| Negative controls: 3 wrong fixes for T01, 4 for T02 | all 7 **FAIL** on the intended checks | same |
+| T02 grader stability (it runs a live broker with timing) | reference fix 5/5 PASS, broken env 3/3 FAIL on the same checks | [`T02 calibration.md`](tasks/T02-mqtt-ingest-gaps/calibration.md) |
+| T01 calibration, 3 batches: Claude Code, `claude-opus-5-5` | **30/30 pass**, 4–10 turns, $7.48 | [`T01 calibration/`](tasks/T01-webhook-401/calibration) |
+| T02 calibration, 1 batch | **10/10 pass**, 6–7 turns, $2.53 | [`T02 calibration/`](tasks/T02-mqtt-ingest-gaps/calibration) |
+| Answer-leak and hard-fail scan over all 40 transcripts and diffs | 0 leaks, 0 hard fails | `summary.json` in each batch |
 
-Recorded on 17 November 2026 on an Apple M2 Pro, Python 3.9.6, Claude Code 2.1.325. **Current verdict on T01: too easy for this model** (30/30; target pass rate is 20–60 %). It stays as the fully documented reference task. See [Calibration](#calibration) for what three batches showed and where difficulty has to come from next.
+Recorded on 17 November 2026 on an Apple M2 Pro, Python 3.9.6, Claude Code 2.1.325. **Current verdict: both tasks are too easy for this model** (40/40; target pass rate is 20–60 %). They stay as fully documented reference tasks. T02 also surfaced a real quality gap the grader does not score (see [T02 calibration](#t02-calibration)), which defines the next, harder variant.
 
 ## Contents
 
@@ -28,6 +28,7 @@ Recorded on 17 November 2026 on an Apple M2 Pro, Python 3.9.6, Claude Code 2.1.3
 - [Repository layout](#repository-layout)
 - [Task T01: MES webhooks rejected with 401](#task-t01-mes-webhooks-rejected-with-401)
 - [Grading: rubric, checks and hard fails](#grading-rubric-checks-and-hard-fails)
+- [Task T02: sensor ingest stores a third of the readings](#task-t02-sensor-ingest-stores-a-third-of-the-readings)
 - [Calibration](#calibration)
 - [Design decisions](#design-decisions)
 - [Known limits](#known-limits)
@@ -43,16 +44,20 @@ A good agent task has four parts that must agree with each other:
 3. **A verified reference solution**, written and run by the task author.
 4. **Measured difficulty**: run a real agent N times and tune the task until the pass rate sits in a useful band.
 
-This repository shows all four for one fully worked task (T01) and gives a template and scripts to build the next ones.
+This repository shows all four for two fully worked tasks (T01, T02) and gives a template and scripts to build the next ones.
 
 ## Quick start
 
 Requirements: Python 3.9+ and `patch`. There are no third-party dependencies.
 
-Check that the task is sound (the grader must fail on the broken env and pass with the reference fix):
+Check that a task is sound: the grader must fail on the broken env, pass with the reference fix, and fail every plausible wrong fix in `authoring/negative_controls.json`:
 
 ```bash
-python3 scripts/validate.py tasks/T01-webhook-401
+python3 scripts/validate.py tasks/T01-webhook-401 --controls
+```
+
+```bash
+python3 scripts/validate.py tasks/T02-mqtt-ingest-gaps --controls
 ```
 
 Grade any candidate workspace, for example one an agent has edited:
@@ -85,12 +90,24 @@ The first returns `202`, the second `401 {"error": "bad signature"}`. The visibl
 cd tasks/T01-webhook-401/env && python3 -m unittest discover -s tests -v
 ```
 
+Try T02: start the plant simulator (broker plus sensors for lines 1–3):
+
+```bash
+cd tasks/T02-mqtt-ingest-gaps/env && python3 tools/plant_sim/run.py
+```
+
+In a second terminal, run the broken ingest service. The simulator terminal fills with `taking over session` warnings, and the service stores about a third of the 60 readings/s:
+
+```bash
+cd tasks/T02-mqtt-ingest-gaps/env && python3 -m ingest.main --config config/ingest.ini
+```
+
 ## Repository layout
 
 ```
 scripts/
-  validate.py         self-check a task, or grade a candidate env/ (--candidate)
-  calibrate.py        run an agent N times in isolated copies, grade, scan for leaks
+  validate.py         self-check a task (--controls runs the wrong fixes too), or grade a candidate env/
+  calibrate.py        run an agent N times in isolated copies, grade, scan for leaks (--summarise-only rebuilds results)
   make_figures.py     rebuild every README figure from repo data
 tasks/
   _template/          skeleton for a new task
@@ -107,7 +124,16 @@ tasks/
     solution.patch    reference fix (applies to env/ with patch -p1)
     calibration.md    batches, knobs, verdicts
     calibration/      raw runs: transcript, final answer, diff, grader log
-    authoring/        log generator and optional vendor doc (never shipped)
+    authoring/        log generator, negative_controls.json, optional vendor doc (never shipped)
+  T02-mqtt-ingest-gaps/
+    env/
+      ingest/         sensor ingest service: config, broker client, worker threads, SQLite store
+      config/         ingest.ini (3 workers since 2.4.0)
+      tests/          visible tests (green on the broken code)
+      logs/           16,365-line service log around the 2.4.0 rollout
+      tools/plant_sim/ broker simulator with MQTT session rules, simulated line sensors
+    grader/           hidden checks G1-G5: runs the candidate against the task's own broker
+    ...               same files as T01
 docs/assets/          figures used in this README
 ```
 
@@ -222,6 +248,80 @@ A rubric is only useful if it rejects wrong answers. These are executed, not des
 - **Global fix** (middleware hands raw bytes to every route) fixes MES and fails A8. The visible ERP test also fails, so an agent that runs the tests can see it.
 - **Auth bypass** fails A4, A5 and A7.
 
+## Task T02: sensor ingest stores a third of the readings
+
+### The situation
+
+The agent receives a Grafana alert ([`prompt.md`](tasks/T02-mqtt-ingest-gaps/prompt.md)): readings stored per minute at the Düsseldorf plant dropped 67 % after this morning's ingest 2.4.0 rollout. Every line still gets some readings. The sensors and the plant broker look healthy, and the release's worker scale-up is needed for line 3.
+
+The workspace is a small sensor ingest service (stdlib, threads, SQLite) that subscribes to an MQTT-style broker, plus a **plant simulator** in `tools/plant_sim/`: a broker that follows MQTT 3.1.1 session rules and simulated sensors for lines 1–3. This task was built after T01's lesson: **the evidence should only appear when the system runs**, not in one readable line of code.
+
+### What the log shows
+
+![Readings stored per second and reconnects per minute around the rollout](docs/assets/t02-ingest-rate.svg)
+
+At 09:40 the rate drops from 15 to about 5 readings/s and the log fills with `connection lost (connection closed by broker); reconnecting in 0.2s`, alternating between the three workers. Nothing in the log says why the broker closes the connections, and no line mentions dropped readings.
+
+### Root cause
+
+Release 2.4.0 runs three worker threads in one process. Each builds its client id with:
+
+```python
+def default_client_id(prefix):
+    # One stable id per ingest process, so the broker keeps our session (and
+    # queues readings) across reconnects when clean_session is false.
+    return "%s-%s-%d" % (prefix, socket.gethostname(), os.getpid())
+```
+
+The pid looks unique, but the workers are threads of the same process, so all three share one id. MQTT allows one live connection per client id: every CONNECT takes the session over and the broker closes the previous worker's connection. That worker reconnects 0.2 s later (the backoff resets after each successful connect) and kicks the next one, forever.
+
+With `clean_session = false` the shared session collects all three subscriptions, so the worker holding it receives every line. Each worker stores only its own line and skips the rest **at DEBUG level**, which never reaches the production log. About one third of readings survive, spread over all lines.
+
+### Traps
+
+| Trap | Where | What a weak fix does |
+|---|---|---|
+| "connection closed by broker" | log | tunes backoff or keepalive, blames the broker |
+| `keepalive` lowered from 60 to 10 in the same release | `config/ingest.ini` | reverts keepalive; nothing changes |
+| Comment says "one stable id per process" | `mqtt_client.py` | the pid looks unique |
+| Skipped readings logged at DEBUG | `worker.py` | the log shows no data loss |
+| End-to-end test uses `workers = 1` | `tests/` | test suite is green on the broken code |
+
+### Reference fix
+
+[`solution.patch`](tasks/T02-mqtt-ingest-gaps/solution.patch) gives each worker its own client id that stays the same across reconnects **and process restarts**:
+
+```python
+def default_client_id(prefix, worker_index):
+    # One id per worker connection. MQTT allows one live connection per client id: workers
+    # sharing an id take each other's session over in a loop. The id must also stay the same
+    # across reconnects and restarts, so the broker keeps the session and queues readings.
+    return "%s-%s-w%d" % (prefix, socket.gethostname(), worker_index)
+```
+
+### T02 grading
+
+The grader ([`grader/test_grader.py`](tasks/T02-mqtt-ingest-gaps/grader/test_grader.py)) starts the **task's own** broker simulator (an agent cannot pass by editing `tools/`), runs the candidate's service with the candidate's config, publishes 100 readings/s per line, closes every ingest connection once mid-run (sessions kept, like a load-balancer failover), and then reads the candidate's SQLite store.
+
+| ID | Check | Why it exists |
+|---|---|---|
+| G1 | ≥ 99 % of published readings stored | the reported symptom |
+| G2 | zero session takeovers at the broker | root cause removed, not masked |
+| G3 | ≥ 99 % of readings published 0.02–0.6 s after the drop stored | session survives a reconnect (stable id, `clean_session = false`) |
+| G4 | config keeps `workers = 3`, `lines = 1,2,3`; at least 3 broker sessions | the scale-up is kept |
+| G5 | at most 3 distinct ingest client ids over the run | ids do not change on reconnect |
+
+Hard fails: fewer workers, removing per-worker line ownership while ids are still shared, weakening existing tests, or changing `tools/plant_sim/`. Full rubric: [`rubric.md`](tasks/T02-mqtt-ingest-gaps/rubric.md).
+
+### T02 negative controls
+
+![validate.py --controls output for T02](docs/assets/t02-validate.svg)
+
+- **`workers = 1`** removes the symptom and fails G4.
+- **A random uuid per connect** stops the takeovers but loses readings during the failover window: fails G1, G3, G5.
+- **Storing every line with the shared id** hides the data loss but the takeover loop continues: fails G2, G4.
+- **Unique ids with `clean_session = true`** loses readings published while reconnecting: fails G1, G3.
+
 ## Calibration
 
 ### Method
@@ -231,23 +331,30 @@ A rubric is only useful if it rejects wrong answers. These are executed, not des
 - Each run gets a **fresh copy of `env/` in a temp directory outside the repo** and only `prompt.md` as input.
 - The agent is Claude Code in headless mode: `claude -p` with `--setting-sources project --strict-mcp-config` (no user hooks, plugins or MCP servers; only Claude Code's built-in plugins and skills load), tools limited to Bash, Read, Edit, Write, Glob, Grep, and web search, web fetch and subagents disabled. Budget: $3 and 20 minutes per run.
 - After each run it saves the transcript, final answer, diff and grader log, records turns and cost, and re-runs the visible test suite.
-- It **scans every transcript for answer leaks** (`solution.patch`, `rubric.md`, the grader, the repo name) and flags diffs that touch files outside `service/` or drop `compare_digest`.
+- It **scans every transcript for answer leaks** (`solution.patch`, `rubric.md`, the grader, the repo name) and records which files each run changed, so hard fails can be reviewed. `--summarise-only` rebuilds the results from saved artifacts.
 
 ### Results
 
-![Calibration results per batch against the 20-60 % target band](docs/assets/t01-calibration.svg)
+![Calibration results per batch against the 20-60 % target band](docs/assets/calibration.svg)
 
 | Batch | Env and knobs | Pass | Explanation 2/2 | Turns | Cost |
 |---|---|---|---|---|---|
-| A | v1: single 80-line handler, vendor doc, deploy marker, 3.7k log lines | 10/10 | 10/10 | 4–10 | $2.10 |
-| B | v1, vendor doc removed, no deploy marker, 23k log lines, 60 % noise | 10/10 | 10/10 | 5–9 | $2.15 |
-| C | v2: gateway package, ERP trap, `abs()` lure, ASCII-only sample, green visible tests | 10/10 | 10/10 | 6–10 | $3.23 |
+| T01 A | v1: single 80-line handler, vendor doc, deploy marker, 3.7k log lines | 10/10 | 10/10 | 4–10 | $2.10 |
+| T01 B | v1, vendor doc removed, no deploy marker, 23k log lines, 60 % noise | 10/10 | 10/10 | 5–9 | $2.15 |
+| T01 C | v2: gateway package, ERP trap, `abs()` lure, ASCII-only sample, green visible tests | 10/10 | 10/10 | 6–10 | $3.23 |
+| T02 A | default: takeover loop, DEBUG-only drops, keepalive lure | 10/10 | 10/10 | 6–7 | $2.53 |
 
-What the agents did in batch C:
+What the agents did in T01 batch C:
 
 - All 10 verified MES over raw bytes and kept the re-encoded body for ERP, the same shape as the reference fix. None tried the global fix, and none touched the `abs()` lure.
 - All 10 added regression tests (raw UTF-8, compact JSON, tampered body). No existing assertion was removed; the two changed lines per run widen a test helper to accept a raw body.
 - No agent blamed clock skew in any batch.
+
+### T02 calibration
+
+- All 10 gave each worker its own id, kept 3 workers and `clean_session = false`, added a 3-worker end-to-end test, and left `tools/` alone. Visible tests are green in all 10 (re-run on workspaces rebuilt from each `diff.patch`).
+- **All 10 kept the pid in the id** (`<prefix>-<host>-<pid>-w<N>`). That passes every check, because the ids are stable across reconnects. But they change on every process restart, so the persistent session and its queued readings are orphaned on each deploy. The reference fix drops the pid. Only 2 of 10 runs flagged this in their answer, as a follow-up.
+- The prompt never states a restart requirement, so this is recorded as a finding, not scored after the fact. It defines the next variant: state the requirement and add a check that restarts the candidate process mid-run.
 
 ### One recorded run
 
@@ -255,31 +362,41 @@ Tool calls, final answer and grade of [`runs-2026-11-17c/run-03`](tasks/T01-webh
 
 ![One recorded agent run](docs/assets/t01-agent-run.svg)
 
+And T02 [`runs-2026-11-17/run-01`](tasks/T02-mqtt-ingest-gaps/calibration/runs-2026-11-17/run-01):
+
+![One recorded T02 agent run](docs/assets/t02-agent-run.svg)
+
 ### What the numbers say
 
 - **Log volume and missing docs changed nothing** (A → B). Agents read the code before the logs.
 - **More code and a cross-route trap raised cost by 50 % and average turns from 7.2 to 8.1** (B → C) **but caused no failures.** The agent read `docs/erp-connector.md`, saw the dependency, and scoped the fix to MES.
 - **HMAC over re-serialized JSON is a well-known bug class.** Once the agent sees `json.dumps` near an HMAC check, decoys around it do not help.
 
-So T01 stays as the easy, fully documented reference task, and difficulty has to come from the next tasks: incidents where the evidence is only in runtime behaviour (a reconnect storm, a retry race), not in a line of code that can be read. The batch notes are in [`calibration.md`](tasks/T01-webhook-401/calibration.md). The v1 environment used in batches A and B is in the git history.
+- **Moving the evidence into runtime behaviour (T02) did not make it hard either.** The takeover loop is obvious in the log, and the simulator reproduces it in seconds. Runs took 6–7 turns, the narrowest spread of any batch.
+- **Where the model fell short was an unstated requirement, not the diagnosis.** In T02 every run fixed the incident, but all 10 left a durability gap that an experienced engineer would check before shipping, and only 2 noticed it.
+
+So T01 and T02 stay as easy, fully documented reference tasks. The next difficulty lever is tasks whose correct fix depends on a non-functional requirement the agent must uphold (durability across restarts, idempotency under retries), checked by the grader and stated in the prompt. Batch notes: [`T01 calibration.md`](tasks/T01-webhook-401/calibration.md), [`T02 calibration.md`](tasks/T02-mqtt-ingest-gaps/calibration.md). The T01 v1 environment used in batches A and B is in the git history.
 
 ## Design decisions
 
 - **Stdlib only.** Any machine with Python 3.9 can run the task, grader and scripts. No Docker or package install sits between the reviewer and the result.
 - **Grade behaviour, not text.** The grader starts the candidate's server and sends HTTP requests. It does not diff against the reference fix, so any correct fix passes.
-- **Checks that catch shortcuts.** A3 exists because `ensure_ascii=False` is the most likely "almost right" fix. A8 exists because removing the re-encoding everywhere is the most likely "too broad" fix. A4–A7 and A9 exist because the cheapest way to stop 401s is to stop checking.
+- **Checks that catch shortcuts.** Every task ships `authoring/negative_controls.json`: plausible wrong fixes that `validate.py --controls` applies and expects to fail. A3 exists because `ensure_ascii=False` is the most likely "almost right" fix. A8 exists because removing the re-encoding everywhere is the most likely "too broad" fix. A4–A7 and A9 exist because the cheapest way to stop 401s is to stop checking.
+- **The grader owns the infrastructure.** T02's grader runs its own pristine broker simulator, not the candidate's copy, so a fix cannot pass by changing the test harness.
 - **A visible test suite that is green on the bug.** That is how real codebases look, and it rewards agents that add a regression test.
 - **Generated data.** The log comes from a seeded generator, so difficulty can be changed and the change reproduced exactly.
 - **Evidence over claims.** Every number in this README comes from a file in the repo, and every figure is rebuilt from those files by one script.
 
 ## Known limits
 
-- **T01 is too easy for `claude-opus-5-5`** (30/30 across three settings). It is a fully worked example of the process, not a well-calibrated hard task.
+- **Both tasks are too easy for `claude-opus-5-5`** (T01 30/30 across three settings, T02 10/10). They are fully worked examples of the process, not well-calibrated hard tasks.
+- **T02's grader depends on timing** (100 readings/s, a 0.6 s failover window). It was stable on this machine (5/5 and 3/3), but a slower or heavily loaded machine could flake.
+- **T02's first batch summary was rebuilt.** `calibrate.py` crashed on a T01-only check after all 10 agent runs had finished and saved their artifacts. The script was fixed and `summary.json` rebuilt with `--summarise-only`; the visible-test result was re-run on workspaces rebuilt from each diff.
 - **Isolation is detected, not enforced.** Agents run with Bash on the host. The leak scan would catch a run that read the grader or rubric, but nothing physically prevents it. A container per run is the next step.
 - **Only one model** has been calibrated so far.
 - **Parallel runs shared the host.** Agents self-tested on ports they chose, sometimes at the same time. Grading always ran on a fresh port, so grades are unaffected, but some agents' own smoke tests may have been noisy.
 - **Transcripts are published unedited.** They contain local temp paths such as `/private/var/folders/...`.
-- **Answers are public.** The grader, rubric and reference fix are in this repo, so T01 cannot serve as a blind benchmark from here on.
+- **Answers are public.** The graders, rubrics and reference fixes are in this repo, so these tasks cannot serve as blind benchmarks from here on.
 - Explanation scores were assigned by the author from `final.md`. They are not automated.
 
 ## Roadmap
@@ -287,7 +404,8 @@ So T01 stays as the easy, fully documented reference task, and difficulty has to
 | ID | Incident | Skill tested | Status |
 |---|---|---|---|
 | T01 | MES webhooks rejected with 401 for some events | log triage, HMAC over raw body, scoped fix across connectors | validated; 30/30, kept as reference |
-| T02 | Sensor readings drop; MQTT reconnect storm | duplicate `client_id`, high-volume logs | planned |
+| T02 | Sensor readings drop after scaling ingest workers | MQTT session takeover from a shared client id, runtime reproduction | validated; 10/10, kept as reference |
+| T02b | Same incident, restart durability stated in the prompt | stable ids across process restarts (new restart check) | next |
 | T03 | Over-temperature alert never fires | unit mismatch in YAML mapping (config fix) | planned |
 | T04 | Duplicate work orders in MES after timeouts | retry without idempotency key | planned |
 | T05 | ERP sync misses records above 1000 rows | cursor pagination off-by-one | planned |
@@ -301,4 +419,4 @@ New tasks start from [`tasks/_template/`](tasks/_template).
 python3 scripts/make_figures.py
 ```
 
-The script reads the incident log, the calibration `summary.json` files and one recorded transcript. It also re-runs `validate.py` and all three negative controls live. `docs/assets/task-lifecycle.svg` is the only hand-drawn figure.
+The script reads both incident logs, the calibration `summary.json` files and one recorded transcript per task. It also re-runs `validate.py` and every negative control live, for both tasks. `docs/assets/task-lifecycle.svg` is the only hand-drawn figure.

@@ -1,0 +1,13 @@
+/Users/cmc-macmini/projects/factory-integration-lab/tasks/T02-mqtt-ingest-gaps/grader/test_grader.py:46: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/t02-grade-2joj7woh/ingest.log' mode='w' encoding='UTF-8'>
+  cls.proc = subprocess.Popen([sys.executable, "-m", "ingest.main", "--config", ini], cwd=str(CANDIDATE),
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+test_g1_all_readings_stored (grader.test_grader.T02) ... ok
+test_g2_no_session_takeovers (grader.test_grader.T02) ... ok
+test_g3_no_loss_across_broker_connection_drop (grader.test_grader.T02) ... ok
+test_g4_three_workers_kept (grader.test_grader.T02) ... ok
+test_g5_reconnect_reuses_session (grader.test_grader.T02) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 7.403s
+
+OK

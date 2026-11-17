@@ -1,0 +1,3 @@
+[
+  {"label": "describe the plausible wrong fix", "file": "path/inside/env.py", "old": "exact text in the broken env", "new": "the wrong fix"}
+]

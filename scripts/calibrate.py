@@ -41,6 +41,33 @@ def run_one(i, task, args, work):
         transcript, timed_out = (e.stdout or b"").decode() if isinstance(e.stdout, bytes) else (e.stdout or ""), True
     (run_dir / "transcript.jsonl").write_text(transcript)
 
+    diff = subprocess.run(["diff", "-ru", "-x", "__pycache__", str(task / "env"), str(ws)],
+                          capture_output=True, text=True).stdout
+    (run_dir / "diff.patch").write_text(diff)
+    passed, log = grade(task, ws)
+    (run_dir / "grader.log").write_text(log)
+    visible = (ws / "tests").is_dir() and subprocess.run(
+        [sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=str(ws), capture_output=True).returncode == 0
+    return summarise(i, run_dir, timed_out, visible)
+
+
+def changed_files(diff):
+    """Paths relative to env/ that the run modified, added or deleted."""
+    out = []
+    for line in diff.splitlines():
+        if line.startswith("diff "):
+            out.append(line.split()[-1].split("/ws-", 1)[-1].split("/", 1)[-1])
+        elif line.startswith("Only in "):
+            where, name = line[len("Only in "):].split(": ", 1)
+            rel = where.split("/env", 1)[-1] if "/ws-" not in where else where.split("/ws-", 1)[-1].partition("/")[2]
+            out.append((rel.strip("/") + "/" + name).strip("/") + (" (deleted)" if "/ws-" not in where else " (new)"))
+    return out
+
+
+def summarise(i, run_dir, timed_out=None, visible=None):
+    """Build one run's summary from its saved artifacts (transcript, diff, grader log)."""
+    transcript = (run_dir / "transcript.jsonl").read_text()
+    log = (run_dir / "grader.log").read_text()
     final, cost, turns, model = "", None, None, None
     for line in transcript.splitlines():
         try:
@@ -52,22 +79,12 @@ def run_one(i, task, args, work):
         if ev.get("type") == "result":
             final, cost, turns = ev.get("result", ""), ev.get("total_cost_usd"), ev.get("num_turns")
     (run_dir / "final.md").write_text(final or "")
-
-    diff = subprocess.run(["diff", "-ru", "-x", "__pycache__", str(task / "env"), str(ws)],
-                          capture_output=True, text=True).stdout
-    (run_dir / "diff.patch").write_text(diff)
-    passed, log = grade(task, ws)
-    (run_dir / "grader.log").write_text(log)
-    visible = (ws / "tests").is_dir() and subprocess.run(
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=str(ws), capture_output=True).returncode == 0
-
-    changed = [l for l in diff.splitlines() if l.startswith(("diff ", "Only in"))]
+    lines = log.strip().splitlines()
     return {
-        "run": i, "model": model, "pass_automated": passed, "visible_tests_pass": visible, "timed_out": timed_out,
-        "cost_usd": cost, "turns": turns,
+        "run": i, "model": model, "pass_automated": bool(lines) and lines[-1].startswith("OK"),
+        "visible_tests_pass": visible, "timed_out": timed_out, "cost_usd": cost, "turns": turns,
         "leak_markers": [m for m in LEAK_MARKERS if m in transcript],
-        "touched_outside_service": [c for c in changed if "/service" not in c],
-        "compare_digest_kept": (ws / "service" / "signing.py").read_text().count("compare_digest") >= 2,
+        "changed_files": changed_files((run_dir / "diff.patch").read_text()),
         "failed_checks": sorted({l.split()[1] for l in log.splitlines() if l.startswith("FAIL:")}),
     }
 
@@ -75,19 +92,26 @@ def run_one(i, task, args, work):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("task", type=pathlib.Path)
-    p.add_argument("--claude", required=True)
+    p.add_argument("--claude")
     p.add_argument("--runs", type=int, default=10)
     p.add_argument("--parallel", type=int, default=5)
     p.add_argument("--model")
     p.add_argument("--budget", type=float, default=3.0, help="max USD per run")
     p.add_argument("--timeout", type=int, default=1200, help="seconds per run")
     p.add_argument("--out", type=pathlib.Path, required=True)
+    p.add_argument("--summarise-only", action="store_true",
+                   help="rebuild summary.json from saved run-XX artifacts without running the agent")
     args = p.parse_args()
     task, args.out = args.task.resolve(), args.out.resolve()
 
-    with tempfile.TemporaryDirectory(prefix="t01-ws-") as tmp:
-        with concurrent.futures.ThreadPoolExecutor(args.parallel) as ex:
-            results = list(ex.map(lambda i: run_one(i, task, args, pathlib.Path(tmp)), range(1, args.runs + 1)))
+    if args.summarise_only:
+        results = [summarise(int(d.name[4:]), d) for d in sorted(args.out.glob("run-*"))]
+    else:
+        if not args.claude:
+            p.error("--claude is required unless --summarise-only")
+        with tempfile.TemporaryDirectory(prefix="cal-ws-") as tmp:
+            with concurrent.futures.ThreadPoolExecutor(args.parallel) as ex:
+                results = list(ex.map(lambda i: run_one(i, task, args, pathlib.Path(tmp)), range(1, args.runs + 1)))
 
     summary = {"task": task.name, "runs": results,
                "pass_automated": sum(r["pass_automated"] for r in results), "total": len(results)}

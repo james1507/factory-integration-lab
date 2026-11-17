@@ -1,0 +1,12 @@
+[
+  {"label": "scale down: workers = 1", "file": "config/ingest.ini",
+   "old": "workers = 3", "new": "workers = 1"},
+  {"label": "random client id per connect (uuid4)", "file": "ingest/worker.py",
+   "old": "self.client = mqtt_client.BrokerClient(self.s.host, self.s.port, self.client_id,",
+   "new": "import uuid; self.client = mqtt_client.BrokerClient(self.s.host, self.s.port, \"ingest-\" + uuid.uuid4().hex,"},
+  {"label": "store every line, keep shared id", "file": "ingest/worker.py",
+   "old": "if reading.get(\"line\") not in self.lines:", "new": "if False:"},
+  {"label": "unique ids but clean_session = true", "file": "ingest/worker.py",
+   "old": "self.client_id = mqtt_client.default_client_id(settings.client_prefix)",
+   "new": "self.client_id = mqtt_client.default_client_id(settings.client_prefix) + \"-w%d\" % index; settings.clean_session = True"}
+]

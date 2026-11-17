@@ -1,0 +1,63 @@
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02-mqtt-ingest-gaps/env/ingest/mqtt_client.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-5o42t6fh/ws-03/ingest/mqtt_client.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02-mqtt-ingest-gaps/env/ingest/mqtt_client.py	2026-11-17 14:54:15
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-5o42t6fh/ws-03/ingest/mqtt_client.py	2026-11-17 15:01:04
+@@ -4,10 +4,13 @@
+ import socket
+ 
+ 
+-def default_client_id(prefix):
+-    # One stable id per ingest process, so the broker keeps our session (and
+-    # queues readings) across reconnects when clean_session is false.
+-    return "%s-%s-%d" % (prefix, socket.gethostname(), os.getpid())
++def default_client_id(prefix, worker_index=0):
++    # One stable id per worker connection, so the broker keeps that worker's
++    # session (and queues its readings) across reconnects when clean_session is
++    # false. The id MUST be unique per connection: the broker treats a second
++    # CONNECT with the same id as a session takeover and closes the first one,
++    # and a shared session would also carry every worker's subscriptions.
++    return "%s-%s-%d-w%d" % (prefix, socket.gethostname(), os.getpid(), worker_index)
+ 
+ 
+ class BrokerClient:
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02-mqtt-ingest-gaps/env/ingest/worker.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-5o42t6fh/ws-03/ingest/worker.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02-mqtt-ingest-gaps/env/ingest/worker.py	2026-11-17 14:54:16
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-5o42t6fh/ws-03/ingest/worker.py	2026-11-17 15:01:04
+@@ -16,7 +16,7 @@
+         self.s = settings
+         self.store = store
+         self.stop_event = stop_event
+-        self.client_id = mqtt_client.default_client_id(settings.client_prefix)
++        self.client_id = mqtt_client.default_client_id(settings.client_prefix, index)
+         self.client = None
+ 
+     def topics(self):
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02-mqtt-ingest-gaps/env/tests/test_ingest.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-5o42t6fh/ws-03/tests/test_ingest.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02-mqtt-ingest-gaps/env/tests/test_ingest.py	2026-11-17 14:55:39
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/t01-ws-5o42t6fh/ws-03/tests/test_ingest.py	2026-11-17 15:01:14
+@@ -48,9 +48,17 @@
+ 
+ class EndToEnd(unittest.TestCase):
+     def test_single_worker_stores_all_lines(self):
++        self._run(workers=1)
++
++    def test_multiple_workers_store_all_lines(self):
++        broker = self._run(workers=3)
++        self.assertEqual(broker.stats["takeovers"], 0)
++        self.assertEqual(len({c for c in broker.connects if c.startswith("ingest-")}), 3)
++
++    def _run(self, workers):
+         broker = Broker().start()
+         tmp = tempfile.mkdtemp()
+-        settings = Settings(write_ini(tmp, broker.port, workers=1))
++        settings = Settings(write_ini(tmp, broker.port, workers=workers))
+         stop = threading.Event()
+         store, _ = start(settings, stop)
+         time.sleep(0.3)
+@@ -62,6 +70,7 @@
+         stop.set()
+         broker.stop()
+         self.assertGreaterEqual(store.count(), len(pub.sent) * 0.99)
++        return broker
+ 
+ 
+ if __name__ == "__main__":

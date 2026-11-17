@@ -1,0 +1,167 @@
+{
+  "task": "T02-mqtt-ingest-gaps",
+  "runs": [
+    {
+      "run": 1,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.2478436,
+      "turns": 6,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 2,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.2669238,
+      "turns": 6,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 3,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.2865992,
+      "turns": 7,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 4,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.23307960000000003,
+      "turns": 7,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 5,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.2341702,
+      "turns": 7,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 6,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.24893300000000004,
+      "turns": 6,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 7,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.24154699999999998,
+      "turns": 6,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 8,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.24538859999999998,
+      "turns": 6,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 9,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.266363,
+      "turns": 6,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 10,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": null,
+      "timed_out": null,
+      "cost_usd": 0.25655279999999997,
+      "turns": 6,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    }
+  ],
+  "pass_automated": 10,
+  "total": 10
+}

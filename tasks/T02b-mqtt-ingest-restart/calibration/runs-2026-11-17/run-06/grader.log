@@ -1,0 +1,38 @@
+/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/suite.py:163: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/t02-grade-sjhb351p/ingest.log' mode='w' encoding='UTF-8'>
+  setUpClass()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+test_g1_all_readings_stored (grader.test_grader.T02b) ... FAIL
+test_g2_no_session_takeovers (grader.test_grader.T02b) ... ok
+test_g3_no_loss_across_broker_connection_drop (grader.test_grader.T02b) ... ok
+test_g4_three_workers_kept (grader.test_grader.T02b) ... ok
+test_g5_reconnect_reuses_session (grader.test_grader.T02b) ... FAIL
+test_g6_no_loss_across_process_restart (grader.test_grader.T02b) ... FAIL
+
+======================================================================
+FAIL: test_g1_all_readings_stored (grader.test_grader.T02b)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/grader/test_grader.py", line 102, in test_g1_all_readings_stored
+    self.assertGreaterEqual(self.ratio(self.sent), 0.99, "stored %d of %d" % (len(self.stored), len(self.sent)))
+AssertionError: 0.9333333333333333 not greater than or equal to 0.99 : stored 2100 of 2250
+
+======================================================================
+FAIL: test_g5_reconnect_reuses_session (grader.test_grader.T02b)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/grader/test_grader.py", line 118, in test_g5_reconnect_reuses_session
+    self.assertLessEqual(len(self.ingest_ids), 3, "client ids must be stable across reconnects and restarts: %s"
+AssertionError: 8 not less than or equal to 3 : client ids must be stable across reconnects and restarts: ['ingest-cmc-macminis-MacBook-Pro.local-8907', 'ingest-cmc-macminis-MacBook-Pro.local-8907-w0', 'ingest-cmc-macminis-MacBook-Pro.local-8907-w1', 'ingest-cmc-macminis-MacBook-Pro.local-8907-w2', 'ingest-cmc-macminis-MacBook-Pro.local-8920', 'ingest-cmc-macminis-MacBook-Pro.local-8920-w0', 'ingest-cmc-macminis-MacBook-Pro.local-8920-w1', 'ingest-cmc-macminis-MacBook-Pro.local-8920-w2']
+
+======================================================================
+FAIL: test_g6_no_loss_across_process_restart (grader.test_grader.T02b)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/grader/test_grader.py", line 123, in test_g6_no_loss_across_process_restart
+    self.assertGreaterEqual(self.ratio(self.restart_window), 0.99,
+AssertionError: 0.0 not greater than or equal to 0.99 : readings published while ingest restarts must be queued and delivered (0 of 135 stored)
+
+----------------------------------------------------------------------
+Ran 6 tests in 10.257s
+
+FAILED (failures=3)

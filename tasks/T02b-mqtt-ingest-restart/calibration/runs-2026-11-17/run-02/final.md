@@ -1,0 +1,13 @@
+I found and fixed the root cause. The 3-worker scale-up in 2.4.0 stays, and so does `clean_session = false`. All 6 tests pass, including two new end-to-end tests. Both new tests fail on the old client-id scheme, with 18 and 24 session takeovers.
+
+**Cause:** In 2.4.0 the three workers connect to the broker with the same client id, because it was built per process (`ingest-<host>-<pid>`) rather than per worker. When a second connection arrives with an id that's already connected, the broker treats it as a session takeover and drops the older one. So the workers kept knocking each other off, with 7,686 "connection lost" lines in the log after 09:40. Worse, they all shared one persistent session that held the subscriptions for all three lines. Whichever worker was connected at the moment got every line's readings and threw away the ones it didn't own (`handle()` skipped other lines). That's why each line kept getting about a third of its readings: 15/s fell to about 4.8/s.
+
+**Fix:**
+- **`ingest/mqtt_client.py`:** each worker now gets its own client id, `ingest-<host>-w<index>`, which stays the same across restarts. I also took the pid out of the id. With the pid in it, a restarted process came back under a new id, so it couldn't pick up the readings its old session had queued during the restart. Removing it keeps the "nothing lost across a restart" guarantee.
+- **`ingest/worker.py`:** a worker now stores any reading for one of the plant's configured lines, not just its own. A persistent session can still be subscribed to lines from an earlier line assignment, and skipping those readings loses them. Duplicates are already dropped by the `(line, seq)` key.
+- **`tests/test_ingest.py`:** two new end-to-end tests. One runs 3 workers and checks that there are no takeovers and that every line is stored in full. The other publishes readings during a restart and checks that none are lost.
+
+**For the deploy:**
+- The old shared session, `ingest-<host>-<pid>`, will stay on the production broker and keep queueing all three lines. If the managed broker allows it, delete it once 2.4.1 is running.
+- Any readings sitting in that old session's queue won't be picked up by the new ids. If you need to fill today's gaps, drain it once with a one-off client using that id.
+- The new ids are tied to the hostname. That only gives a seamless restart if the replacement instance keeps the same hostname, for example a stable pod name. If your rolling deploys assign new hostnames, set a fixed `client_prefix` per instance.

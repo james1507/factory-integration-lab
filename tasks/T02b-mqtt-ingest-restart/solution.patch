@@ -1,0 +1,34 @@
+diff -ru a/ingest/mqtt_client.py b/ingest/mqtt_client.py
+--- a/ingest/mqtt_client.py	2026-11-17 14:56:01
++++ b/ingest/mqtt_client.py	2026-11-17 14:56:01
+@@ -1,13 +1,13 @@
+ """Minimal client for the plant broker (see tools/plant_sim/README.md for the wire format)."""
+ import json
+-import os
+ import socket
+ 
+ 
+-def default_client_id(prefix):
+-    # One stable id per ingest process, so the broker keeps our session (and
+-    # queues readings) across reconnects when clean_session is false.
+-    return "%s-%s-%d" % (prefix, socket.gethostname(), os.getpid())
++def default_client_id(prefix, worker_index):
++    # One id per worker connection. MQTT allows one live connection per client id: workers
++    # sharing an id take each other's session over in a loop. The id must also stay the same
++    # across reconnects and restarts, so the broker keeps the session and queues readings.
++    return "%s-%s-w%d" % (prefix, socket.gethostname(), worker_index)
+ 
+ 
+ class BrokerClient:
+diff -ru a/ingest/worker.py b/ingest/worker.py
+--- a/ingest/worker.py	2026-11-17 14:56:01
++++ b/ingest/worker.py	2026-11-17 14:56:01
+@@ -16,7 +16,7 @@
+         self.s = settings
+         self.store = store
+         self.stop_event = stop_event
+-        self.client_id = mqtt_client.default_client_id(settings.client_prefix)
++        self.client_id = mqtt_client.default_client_id(settings.client_prefix, index)
+         self.client = None
+ 
+     def topics(self):

@@ -1,0 +1,214 @@
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/main.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-07/ingest/main.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/main.py	2026-11-17 14:59:33
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-07/ingest/main.py	2026-11-17 15:49:24
+@@ -6,12 +6,14 @@
+ import time
+ 
+ from . import __version__
++from . import mqtt_client
+ from .config import Settings
+ from .store import ReadingStore
+ from .worker import Worker
+ 
+ log = logging.getLogger("ingest")
+ STATS_EVERY_S = 10
++LEGACY_DRAIN_S = 5
+ 
+ 
+ def assign_lines(lines, workers):
+@@ -25,7 +27,54 @@
+                for i, owned in enumerate(assign_lines(settings.lines, settings.workers)) if owned]
+     for w in workers:
+         w.start()
++    threading.Thread(target=drain_legacy_session, args=(settings, store, workers, stop_event),
++                     name="legacy-drain", daemon=True).start()
+     return store, workers
++
++
++def drain_legacy_session(settings, store, workers, stop_event, drain_s=LEGACY_DRAIN_S):
++    """Store readings queued under the pre-2.4.1 shared client id, then delete that session.
++
++    Up to 2.4.0 every worker used the bare process client id. The broker keeps
++    that session (subscribed to all lines) and queues readings for it while
++    ingest restarts. Once the per-worker sessions are subscribed, take it over
++    one last time, store what it delivers, and end it with a clean connect so
++    it stops queueing. Overlap with the worker sessions is de-duplicated by
++    the store.
++    """
++    for w in workers:
++        while not w.subscribed.wait(0.5):
++            if stop_event.is_set():
++                return
++    cid = mqtt_client.default_client_id(settings.client_prefix)
++    try:
++        c = mqtt_client.BrokerClient(settings.host, settings.port, cid, 1, clean_session=False)
++        present = c.connect()
++        drained = 0
++        if present:
++            deadline = time.monotonic() + drain_s
++            c._sock.settimeout(1)
++            try:
++                while time.monotonic() < deadline and not stop_event.is_set():
++                    try:
++                        msg = c._read()
++                    except OSError:  # idle for 1s: queue is flushed
++                        break
++                    if msg.get("op") == "publish":
++                        store.insert(msg["payload"])
++                        drained += 1
++            except ConnectionError:
++                pass
++        c.close()
++        # A clean-session connect discards the stored session on the broker.
++        c = mqtt_client.BrokerClient(settings.host, settings.port, cid, settings.keepalive,
++                                     clean_session=True)
++        c.connect()
++        c.close()
++        if present:
++            log.info("drained %d readings from legacy session %s and removed it", drained, cid)
++    except (OSError, ConnectionError, ValueError) as exc:
++        log.warning("could not drain legacy session %s (%s); will retry on next start", cid, exc)
+ 
+ 
+ def main():
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/mqtt_client.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-07/ingest/mqtt_client.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/mqtt_client.py	2026-11-17 14:54:15
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-07/ingest/mqtt_client.py	2026-11-17 15:49:15
+@@ -10,6 +10,14 @@
+     return "%s-%s-%d" % (prefix, socket.gethostname(), os.getpid())
+ 
+ 
++def worker_client_id(prefix, index):
++    # The broker identifies a session by client id, and a second connection
++    # with the same id takes the session over (closing the first one). Every
++    # worker therefore needs its own id; it stays stable across restarts so
++    # the worker resumes its persistent session and gets what was queued.
++    return "%s-w%d" % (default_client_id(prefix), index)
++
++
+ class BrokerClient:
+     def __init__(self, host, port, client_id, keepalive=60, clean_session=False):
+         self.addr = (host, port)
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/worker.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-07/ingest/worker.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/worker.py	2026-11-17 14:54:16
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-07/ingest/worker.py	2026-11-17 15:49:15
+@@ -16,8 +16,9 @@
+         self.s = settings
+         self.store = store
+         self.stop_event = stop_event
+-        self.client_id = mqtt_client.default_client_id(settings.client_prefix)
++        self.client_id = mqtt_client.worker_client_id(settings.client_prefix, index)
+         self.client = None
++        self.subscribed = threading.Event()
+ 
+     def topics(self):
+         return ["plant/%s/line/%d/temp" % (self.s.plant, line) for line in sorted(self.lines)]
+@@ -31,6 +32,7 @@
+                 present = self.client.connect()
+                 for t in self.topics():
+                     self.client.subscribe(t)
++                self.subscribed.set()
+                 log.info("worker=%d connected lines=%s session_present=%s",
+                          self.index, sorted(self.lines), present)
+                 delay = self.s.backoff_initial
+@@ -48,8 +50,9 @@
+                 self.client.close()
+ 
+     def handle(self, reading):
+-        if reading.get("line") not in self.lines:
+-            # Another worker owns this line; it will store the reading.
+-            log.debug("worker=%d skipping reading for line %s", self.index, reading.get("line"))
+-            return
++        # Store whatever the broker delivers to this session, even for a line
++        # this worker does not own: a persistent session keeps subscriptions
++        # from an earlier line assignment (e.g. after a worker count change),
++        # and readings queued there during a restart exist nowhere else.
++        # The store de-duplicates on (line, seq).
+         self.store.insert(reading)
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/tests/test_ingest.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-07/tests/test_ingest.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/tests/test_ingest.py	2026-11-17 14:55:39
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-07/tests/test_ingest.py	2026-11-17 15:49:40
+@@ -13,6 +13,7 @@
+ from broker import Broker, topic_matches  # noqa: E402
+ from publisher import Publisher  # noqa: E402
+ 
++from ingest import mqtt_client  # noqa: E402
+ from ingest.config import Settings  # noqa: E402
+ from ingest.main import assign_lines, start  # noqa: E402
+ from ingest.store import ReadingStore  # noqa: E402
+@@ -62,6 +63,75 @@
+         stop.set()
+         broker.stop()
+         self.assertGreaterEqual(store.count(), len(pub.sent) * 0.99)
++
++    def _run(self, broker, settings, seconds):
++        pub = Publisher(broker.port, rate=50)
++        pub.start()
++        time.sleep(seconds)
++        pub.stop()
++        return pub
++
++    def test_three_workers_store_all_lines(self):
++        broker = Broker().start()
++        tmp = tempfile.mkdtemp()
++        settings = Settings(write_ini(tmp, broker.port, workers=3))
++        stop = threading.Event()
++        store, _ = start(settings, stop)
++        time.sleep(0.3)
++        pub = self._run(broker, settings, 2)
++        time.sleep(0.5)
++        stop.set()
++        broker.stop()
++        self.assertEqual(broker.stats["takeovers"], 0)
++        self.assertGreaterEqual(store.count(), len(pub.sent) * 0.99)
++
++    def test_readings_during_restart_are_kept_with_three_workers(self):
++        broker = Broker().start()
++        tmp = tempfile.mkdtemp()
++        settings = Settings(write_ini(tmp, broker.port, workers=3))
++        pub = Publisher(broker.port, rate=50)
++        stop = threading.Event()
++        store, _ = start(settings, stop)
++        time.sleep(0.3)
++        pub.start()
++        time.sleep(0.5)
++        stop.set()                      # ingest goes down ...
++        broker.drop_all_connections(except_ids=("plant-sim-sensors",))
++        time.sleep(1)                   # ... readings keep arriving ...
++        stop2 = threading.Event()
++        store2, _ = start(settings, stop2)  # ... and the new process comes up
++        time.sleep(0.5)
++        pub.stop()
++        time.sleep(0.5)
++        stop2.set()
++        broker.stop()
++        self.assertEqual(store2.count(), len(pub.sent))
++
++    def test_legacy_shared_session_is_drained_and_removed(self):
++        broker = Broker().start()
++        tmp = tempfile.mkdtemp()
++        settings = Settings(write_ini(tmp, broker.port, workers=3))
++        legacy = mqtt_client.default_client_id(settings.client_prefix)
++        # A 2.4.0 process left its shared session behind with readings queued.
++        c = mqtt_client.BrokerClient("127.0.0.1", broker.port, legacy, clean_session=False)
++        c.connect()
++        for line in (1, 2, 3):
++            c.subscribe("plant/dus/line/%d/temp" % line)
++        c.close()
++        time.sleep(0.2)
++        for seq in range(1, 11):
++            for line in (1, 2, 3):
++                broker.publish("plant/dus/line/%d/temp" % line,
++                               {"line": line, "seq": seq, "temp_c": 65.0, "ts": 0})
++        stop = threading.Event()
++        store, _ = start(settings, stop)
++        deadline = time.monotonic() + 5
++        while legacy in broker.sessions and time.monotonic() < deadline:
++            time.sleep(0.1)
++        stop.set()
++        broker.stop()
++        self.assertEqual(store.count(), 30)
++        self.assertNotIn(legacy, broker.sessions)
+ 
+ 
+ if __name__ == "__main__":

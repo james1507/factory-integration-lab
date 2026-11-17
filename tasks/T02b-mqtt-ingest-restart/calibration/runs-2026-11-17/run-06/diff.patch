@@ -1,0 +1,236 @@
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/main.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-06/ingest/main.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/main.py	2026-11-17 14:59:33
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-06/ingest/main.py	2026-11-17 15:49:16
+@@ -5,7 +5,7 @@
+ import threading
+ import time
+ 
+-from . import __version__
++from . import __version__, mqtt_client
+ from .config import Settings
+ from .store import ReadingStore
+ from .worker import Worker
+@@ -19,12 +19,50 @@
+     return [lines[i::workers] for i in range(workers)]
+ 
+ 
++def retire_shared_session(settings, store, workers, timeout=30):
++    """Hand over from the single session that all workers shared in 2.4.0.
++
++    That session may still hold readings the broker queued while we were
++    restarting. Once every worker's own session is subscribed (so nothing new
++    can fall between the two), drain and store those readings, then delete the
++    old session so the broker stops queueing into it.
++    """
++    if not settings.clean_session:
++        deadline = time.monotonic() + timeout
++        for w in workers:
++            if not w.subscribed.wait(max(0.0, deadline - time.monotonic())):
++                log.warning("workers not subscribed after %ss; keeping shared session for next start", timeout)
++                return 0
++    cid = mqtt_client.default_client_id(settings.client_prefix)
++    stored = 0
++    c = mqtt_client.BrokerClient(settings.host, settings.port, cid, settings.keepalive, clean_session=False)
++    try:
++        if c.connect():
++            for _topic, reading in c.drain():
++                if reading.get("line") in settings.lines and store.insert(reading):
++                    stored += 1
++            log.info("retired shared session %s: stored %d queued readings", cid, stored)
++    finally:
++        c.close()
++    # A clean-session connect + disconnect deletes the old session on the broker.
++    c = mqtt_client.BrokerClient(settings.host, settings.port, cid, settings.keepalive, clean_session=True)
++    try:
++        c.connect()
++    finally:
++        c.close()
++    return stored
++
++
+ def start(settings, stop_event):
+     store = ReadingStore(settings.db_path)
+     workers = [Worker(i, owned, settings, store, stop_event)
+                for i, owned in enumerate(assign_lines(settings.lines, settings.workers)) if owned]
+     for w in workers:
+         w.start()
++    try:
++        retire_shared_session(settings, store, workers)
++    except (OSError, ConnectionError, ValueError) as exc:
++        log.warning("could not retire shared session (%s); will retry on next start", exc)
+     return store, workers
+ 
+ 
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/mqtt_client.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-06/ingest/mqtt_client.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/mqtt_client.py	2026-11-17 14:54:15
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-06/ingest/mqtt_client.py	2026-11-17 15:49:16
+@@ -5,11 +5,21 @@
+ 
+ 
+ def default_client_id(prefix):
+-    # One stable id per ingest process, so the broker keeps our session (and
+-    # queues readings) across reconnects when clean_session is false.
++    # Stable base id for this ingest process, so the broker keeps our session
++    # (and queues readings) across reconnects when clean_session is false.
++    # Up to 2.4.0 this was also the id of the single broker session.
+     return "%s-%s-%d" % (prefix, socket.gethostname(), os.getpid())
+ 
+ 
++def worker_client_id(prefix, index):
++    # A client id identifies exactly one broker session, and a second CONNECT
++    # with the same id takes the session over and drops the first connection.
++    # Each worker therefore needs its own id; it must still be stable across
++    # restarts so its persistent session (and the readings queued in it while
++    # we were down) is picked up again.
++    return "%s-w%d" % (default_client_id(prefix), index)
++
++
+ class BrokerClient:
+     def __init__(self, host, port, client_id, keepalive=60, clean_session=False):
+         self.addr = (host, port)
+@@ -44,6 +54,20 @@
+                 continue
+             if msg.get("op") == "publish":
+                 yield msg["topic"], msg["payload"]
++
++    def drain(self):
++        """Return the publishes the broker sends before answering a ping.
++
++        Right after connect this is what was queued for the session while no
++        connection was attached."""
++        self._send({"op": "ping"})
++        out = []
++        while True:
++            msg = self._read()
++            if msg.get("op") == "pong":
++                return out
++            if msg.get("op") == "publish":
++                out.append((msg["topic"], msg["payload"]))
+ 
+     def close(self):
+         if self._sock:
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/worker.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-06/ingest/worker.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/worker.py	2026-11-17 14:54:16
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-06/ingest/worker.py	2026-11-17 15:50:23
+@@ -16,8 +16,9 @@
+         self.s = settings
+         self.store = store
+         self.stop_event = stop_event
+-        self.client_id = mqtt_client.default_client_id(settings.client_prefix)
++        self.client_id = mqtt_client.worker_client_id(settings.client_prefix, index)
+         self.client = None
++        self.subscribed = threading.Event()  # set once our session has all subscriptions
+ 
+     def topics(self):
+         return ["plant/%s/line/%d/temp" % (self.s.plant, line) for line in sorted(self.lines)]
+@@ -31,6 +32,7 @@
+                 present = self.client.connect()
+                 for t in self.topics():
+                     self.client.subscribe(t)
++                self.subscribed.set()
+                 log.info("worker=%d connected lines=%s session_present=%s",
+                          self.index, sorted(self.lines), present)
+                 delay = self.s.backoff_initial
+@@ -49,7 +51,7 @@
+ 
+     def handle(self, reading):
+         if reading.get("line") not in self.lines:
+-            # Another worker owns this line; it will store the reading.
+-            log.debug("worker=%d skipping reading for line %s", self.index, reading.get("line"))
++            # Our session only subscribes to our own lines, so this is unexpected.
++            log.warning("worker=%d skipping reading for line %s", self.index, reading.get("line"))
+             return
+         self.store.insert(reading)
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/tests/test_ingest.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-06/tests/test_ingest.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/tests/test_ingest.py	2026-11-17 14:55:39
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-06/tests/test_ingest.py	2026-11-17 15:49:43
+@@ -1,6 +1,7 @@
+ """Ingest tests. Run from env/:  python3 -m unittest discover -s tests -v"""
+ import os
+ import pathlib
++import socket
+ import sys
+ import tempfile
+ import threading
+@@ -13,6 +14,7 @@
+ from broker import Broker, topic_matches  # noqa: E402
+ from publisher import Publisher  # noqa: E402
+ 
++from ingest import mqtt_client  # noqa: E402
+ from ingest.config import Settings  # noqa: E402
+ from ingest.main import assign_lines, start  # noqa: E402
+ from ingest.store import ReadingStore  # noqa: E402
+@@ -62,6 +64,73 @@
+         stop.set()
+         broker.stop()
+         self.assertGreaterEqual(store.count(), len(pub.sent) * 0.99)
++
++    def test_three_workers_store_all_lines(self):
++        broker = Broker().start()
++        tmp = tempfile.mkdtemp()
++        settings = Settings(write_ini(tmp, broker.port, workers=3))
++        stop = threading.Event()
++        store, _ = start(settings, stop)
++        time.sleep(0.3)
++        pub = Publisher(broker.port, rate=50)
++        pub.start()
++        time.sleep(1.5)
++        pub.stop()
++        time.sleep(0.5)
++        stop.set()
++        broker.stop()
++        self.assertEqual(broker.stats["takeovers"], 0)
++        for line in (1, 2, 3):
++            sent = sum(1 for l, _s, _t in pub.sent if l == line)
++            self.assertGreaterEqual(store.count(line), sent * 0.99, "line %d" % line)
++
++    def test_readings_queued_during_restart_are_stored(self):
++        broker = Broker().start()
++        tmp = tempfile.mkdtemp()
++        settings = Settings(write_ini(tmp, broker.port, workers=3))
++        stop = threading.Event()
++        _, workers = start(settings, stop)
++        time.sleep(0.3)
++        stop.set()                      # first process goes away
++        for w in workers:
++            w.client.close()
++            w.join(2)
++        pub = Publisher(broker.port, rate=50)
++        pub.start()
++        time.sleep(1)
++        pub.stop()                      # everything published while ingest was down
++        stop2 = threading.Event()
++        store, _ = start(settings, stop2)
++        time.sleep(1)
++        stop2.set()
++        broker.stop()
++        self.assertEqual(store.count(), len(pub.sent))
++
++    def test_upgrade_from_shared_session_keeps_queued_readings(self):
++        broker = Broker().start()
++        tmp = tempfile.mkdtemp()
++        settings = Settings(write_ini(tmp, broker.port, workers=3))
++        # 2.4.0 left one session, subscribed to all lines, under the shared id.
++        old = mqtt_client.BrokerClient("127.0.0.1", broker.port,
++                                       mqtt_client.default_client_id(settings.client_prefix))
++        old.connect()
++        for line in settings.lines:
++            old.subscribe("plant/dus/line/%d/temp" % line)
++        old.drain()
++        old._sock.shutdown(socket.SHUT_RDWR)  # killed for the deploy, no clean disconnect
++        time.sleep(0.2)
++        pub = Publisher(broker.port, rate=50)
++        pub.start()
++        time.sleep(0.5)
++        stop = threading.Event()
++        store, _ = start(settings, stop)
++        time.sleep(0.5)
++        pub.stop()
++        time.sleep(0.5)
++        stop.set()
++        broker.stop()
++        self.assertEqual(store.count(), len(pub.sent))
++        self.assertNotIn(mqtt_client.default_client_id(settings.client_prefix), broker.sessions)
+ 
+ 
+ if __name__ == "__main__":

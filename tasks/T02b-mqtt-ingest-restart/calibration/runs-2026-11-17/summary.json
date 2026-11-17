@@ -1,0 +1,185 @@
+{
+  "task": "T02b-mqtt-ingest-restart",
+  "runs": [
+    {
+      "run": 1,
+      "model": "claude-opus-5-5",
+      "pass_automated": false,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.3461828,
+      "turns": 8,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": [
+        "test_g1_all_readings_stored",
+        "test_g5_reconnect_reuses_session",
+        "test_g6_no_loss_across_process_restart"
+      ]
+    },
+    {
+      "run": 2,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.3375438,
+      "turns": 8,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 3,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.38604679999999997,
+      "turns": 9,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 4,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.3183338,
+      "turns": 7,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 5,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.44332659999999996,
+      "turns": 12,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 6,
+      "model": "claude-opus-5-5",
+      "pass_automated": false,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.4588432,
+      "turns": 9,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/main.py",
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": [
+        "test_g1_all_readings_stored",
+        "test_g5_reconnect_reuses_session",
+        "test_g6_no_loss_across_process_restart"
+      ]
+    },
+    {
+      "run": 7,
+      "model": "claude-opus-5-5",
+      "pass_automated": false,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.46180980000000005,
+      "turns": 9,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/main.py",
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": [
+        "test_g1_all_readings_stored",
+        "test_g5_reconnect_reuses_session",
+        "test_g6_no_loss_across_process_restart"
+      ]
+    },
+    {
+      "run": 8,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.3668982,
+      "turns": 7,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 9,
+      "model": "claude-opus-5-5",
+      "pass_automated": true,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.2980694,
+      "turns": 5,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": []
+    },
+    {
+      "run": 10,
+      "model": "claude-opus-5-5",
+      "pass_automated": false,
+      "visible_tests_pass": true,
+      "timed_out": false,
+      "cost_usd": 0.3245952,
+      "turns": 6,
+      "leak_markers": [],
+      "changed_files": [
+        "ingest/mqtt_client.py",
+        "ingest/worker.py",
+        "tests/test_ingest.py"
+      ],
+      "failed_checks": [
+        "test_g1_all_readings_stored",
+        "test_g5_reconnect_reuses_session",
+        "test_g6_no_loss_across_process_restart"
+      ]
+    }
+  ],
+  "pass_automated": 6,
+  "total": 10
+}

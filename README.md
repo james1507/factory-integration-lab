@@ -12,14 +12,15 @@ Each task drops an agent into an incident the way an on-call engineer meets it: 
 
 | What was executed | Result | Evidence |
 |---|---|---|
-| T01 and T02 self-check: hidden grader on broken env vs. reference fix | broken **FAIL**, fixed **PASS** (visible tests also green) | `validate.py --controls`, [T01](#negative-controls), [T02](#t02-negative-controls) |
-| Negative controls: 3 wrong fixes for T01, 4 for T02 | all 7 **FAIL** on the intended checks | same |
-| T02 grader stability (it runs a live broker with timing) | reference fix 5/5 PASS, broken env 3/3 FAIL on the same checks | [`T02 calibration.md`](tasks/T02-mqtt-ingest-gaps/calibration.md) |
+| T01, T02, T02b self-check: hidden grader on broken env vs. reference fix | broken **FAIL**, fixed **PASS** (visible tests also green) | `validate.py --controls`, [T01](#negative-controls), [T02](#t02-negative-controls) |
+| Negative controls: 3 wrong fixes for T01, 4 for T02, 5 for T02b | all 12 **FAIL** on the intended checks | same |
+| T02 and T02b grader stability (live broker, timing, process restart) | reference fix 5/5 PASS each, broken env 3/3 FAIL on the same checks | each task's `calibration.md` |
 | T01 calibration, 3 batches: Claude Code, `claude-opus-5-5` | **30/30 pass**, 4–10 turns, $7.48 | [`T01 calibration/`](tasks/T01-webhook-401/calibration) |
 | T02 calibration, 1 batch | **10/10 pass**, 6–7 turns, $2.53 | [`T02 calibration/`](tasks/T02-mqtt-ingest-gaps/calibration) |
-| Answer-leak and hard-fail scan over all 40 transcripts and diffs | 0 leaks, 0 hard fails | `summary.json` in each batch |
+| T02b calibration, 1 batch | **6/10 pass**, in the 20–60 % target band | [`T02b calibration/`](tasks/T02b-mqtt-ingest-restart/calibration) |
+| Answer-leak and hard-fail scan over all 50 transcripts and diffs | 0 leaks, 0 hard fails | `summary.json` in each batch |
 
-Recorded on 17 November 2026 on an Apple M2 Pro, Python 3.9.6, Claude Code 2.1.325. **Current verdict: both tasks are too easy for this model** (40/40; target pass rate is 20–60 %). They stay as fully documented reference tasks. T02 also surfaced a real quality gap the grader does not score (see [T02 calibration](#t02-calibration)), which defines the next, harder variant.
+Recorded on 17 November 2026 on an Apple M2 Pro, Python 3.9.6, Claude Code 2.1.325. **Current verdict: T01 and T02 are too easy for this model** (40/40; target pass rate is 20–60 %) and stay as fully documented reference tasks. **T02b lands at 6/10.** It was built from a gap T02's calibration exposed: every T02 run left a durability guarantee broken. In T02b, the 4 failing runs all claimed the guarantee held and "proved" it with a test that could not catch the bug (see [T02b](#task-t02b-the-same-incident-with-the-restart-guarantee-stated)).
 
 ## Contents
 
@@ -29,6 +30,7 @@ Recorded on 17 November 2026 on an Apple M2 Pro, Python 3.9.6, Claude Code 2.1.3
 - [Task T01: MES webhooks rejected with 401](#task-t01-mes-webhooks-rejected-with-401)
 - [Grading: rubric, checks and hard fails](#grading-rubric-checks-and-hard-fails)
 - [Task T02: sensor ingest stores a third of the readings](#task-t02-sensor-ingest-stores-a-third-of-the-readings)
+- [Task T02b: the same incident with the restart guarantee stated](#task-t02b-the-same-incident-with-the-restart-guarantee-stated)
 - [Calibration](#calibration)
 - [Design decisions](#design-decisions)
 - [Known limits](#known-limits)
@@ -44,7 +46,7 @@ A good agent task has four parts that must agree with each other:
 3. **A verified reference solution**, written and run by the task author.
 4. **Measured difficulty**: run a real agent N times and tune the task until the pass rate sits in a useful band.
 
-This repository shows all four for two fully worked tasks (T01, T02) and gives a template and scripts to build the next ones.
+This repository shows all four for three fully worked tasks (T01, T02, T02b) and gives a template and scripts to build the next ones.
 
 ## Quick start
 
@@ -134,6 +136,8 @@ tasks/
       tools/plant_sim/ broker simulator with MQTT session rules, simulated line sensors
     grader/           hidden checks G1-G5: runs the candidate against the task's own broker
     ...               same files as T01
+  T02b-mqtt-ingest-restart/
+    ...               T02 with the restart guarantee in prompt.md and a process-restart check (G6)
 docs/assets/          figures used in this README
 ```
 
@@ -322,6 +326,31 @@ Hard fails: fewer workers, removing per-worker line ownership while ids are stil
 - **Storing every line with the shared id** hides the data loss but the takeover loop continues: fails G2, G4.
 - **Unique ids with `clean_session = true`** loses readings published while reconnecting: fails G1, G3.
 
+## Task T02b: the same incident with the restart guarantee stated
+
+T02's calibration showed every run fixing the takeover loop with an id like `ingest-<host>-<pid>-w<N>`. That stops the incident but breaks a guarantee the service exists to keep: the id changes on every restart, so readings the broker queued during a deploy are orphaned. T02 never stated that requirement, so it was not scored there after the fact. **T02b is a separate task**: the same env and reference fix, plus two changes.
+
+1. The prompt states the requirement: *"Ingest is restarted several times a day by rolling deploys. Readings that arrive while it restarts must not be lost; that is why the broker sessions are persistent (`clean_session = false`). Your fix must keep that guarantee."*
+2. The grader adds **G6**: it stops the candidate process (SIGTERM), waits 0.3 s, starts it again, and requires ≥ 99 % of readings published during that window to be stored. G5 now also counts the ids used after the restart.
+
+![validate.py --controls output for T02b](docs/assets/t02b-validate.svg)
+
+The first negative control is exactly the fix all 10 T02 runs shipped. It now fails G1, G5 and G6. The reference fix passed 5/5 consecutive gradings.
+
+### T02b calibration
+
+**6/10 pass.** All 10 fixed the takeover loop. The 6 that passed dropped the pid (for example `<prefix>-<host>-w<N>`).
+
+The 4 that failed (runs 1, 6, 7, 10) kept the pid, and their answers show why the task discriminates:
+
+- **Every one claimed the id "stays the same across restarts".**
+- **Every one wrote a restart test that could not catch the bug.** Each simulated the restart by calling `start(settings, ...)` twice in the same Python process, so `os.getpid()` never changed and the test passed. Run 7's comment reads "the new process comes up" on an in-process call.
+- Runs 6 and 7 went further and built an upgrade handover that drains the old shared 2.4.0 session on startup: careful work on top of an id that still breaks on the next deploy.
+
+![A failing T02b run: confident answer, grader FAIL on G1, G5, G6](docs/assets/t02b-agent-run-fail.svg)
+
+Details: [`T02b calibration.md`](tasks/T02b-mqtt-ingest-restart/calibration.md).
+
 ## Calibration
 
 ### Method
@@ -343,6 +372,7 @@ Hard fails: fewer workers, removing per-worker line ownership while ids are stil
 | T01 B | v1, vendor doc removed, no deploy marker, 23k log lines, 60 % noise | 10/10 | 10/10 | 5–9 | $2.15 |
 | T01 C | v2: gateway package, ERP trap, `abs()` lure, ASCII-only sample, green visible tests | 10/10 | 10/10 | 6–10 | $3.23 |
 | T02 A | default: takeover loop, DEBUG-only drops, keepalive lure | 10/10 | 10/10 | 6–7 | $2.53 |
+| T02b A | T02 + restart guarantee in prompt + process-restart check G6 | **6/10** | see notes | 5–12 | $3.74 |
 
 What the agents did in T01 batch C:
 
@@ -375,7 +405,9 @@ And T02 [`runs-2026-11-17/run-01`](tasks/T02-mqtt-ingest-gaps/calibration/runs-2
 - **Moving the evidence into runtime behaviour (T02) did not make it hard either.** The takeover loop is obvious in the log, and the simulator reproduces it in seconds. Runs took 6–7 turns, the narrowest spread of any batch.
 - **Where the model fell short was an unstated requirement, not the diagnosis.** In T02 every run fixed the incident, but all 10 left a durability gap that an experienced engineer would check before shipping, and only 2 noticed it.
 
-So T01 and T02 stay as easy, fully documented reference tasks. The next difficulty lever is tasks whose correct fix depends on a non-functional requirement the agent must uphold (durability across restarts, idempotency under retries), checked by the grader and stated in the prompt. Batch notes: [`T01 calibration.md`](tasks/T01-webhook-401/calibration.md), [`T02 calibration.md`](tasks/T02-mqtt-ingest-gaps/calibration.md). The T01 v1 environment used in batches A and B is in the git history.
+- **Stating that requirement and checking it with a real restart (T02b) produced the first in-band result: 6/10.** The failures were not about diagnosis. They were about verification: agents tested the guarantee in a way that could not fail.
+
+So T01 and T02 stay as easy, fully documented reference tasks, and T02b is the first calibrated one. The pattern to repeat is tasks whose correct fix depends on a non-functional requirement the agent must uphold (durability across restarts, idempotency under retries), stated in the prompt and checked by the grader under real conditions. T04 (duplicate work orders after timeouts) is next on that pattern. Batch notes: [`T01 calibration.md`](tasks/T01-webhook-401/calibration.md), [`T02 calibration.md`](tasks/T02-mqtt-ingest-gaps/calibration.md). The T01 v1 environment used in batches A and B is in the git history.
 
 ## Design decisions
 
@@ -389,8 +421,8 @@ So T01 and T02 stay as easy, fully documented reference tasks. The next difficul
 
 ## Known limits
 
-- **Both tasks are too easy for `claude-opus-5-5`** (T01 30/30 across three settings, T02 10/10). They are fully worked examples of the process, not well-calibrated hard tasks.
-- **T02's grader depends on timing** (100 readings/s, a 0.6 s failover window). It was stable on this machine (5/5 and 3/3), but a slower or heavily loaded machine could flake.
+- **T01 and T02 are too easy for `claude-opus-5-5`** (T01 30/30 across three settings, T02 10/10). T02b is in band at 6/10, but one batch of 10 is a small sample: the 95 % Wilson interval for the true rate is about 31 % to 83 %.
+- **T02 and T02b graders depend on timing** (100 readings/s, a 0.6 s failover window, a 0.3 s restart gap). They were stable on this machine (5/5 and 3/3 each), but a slower or heavily loaded machine could flake.
 - **T02's first batch summary was rebuilt.** `calibrate.py` crashed on a T01-only check after all 10 agent runs had finished and saved their artifacts. The script was fixed and `summary.json` rebuilt with `--summarise-only`; the visible-test result was re-run on workspaces rebuilt from each diff.
 - **Isolation is detected, not enforced.** Agents run with Bash on the host. The leak scan would catch a run that read the grader or rubric, but nothing physically prevents it. A container per run is the next step.
 - **Only one model** has been calibrated so far.
@@ -405,9 +437,9 @@ So T01 and T02 stay as easy, fully documented reference tasks. The next difficul
 |---|---|---|---|
 | T01 | MES webhooks rejected with 401 for some events | log triage, HMAC over raw body, scoped fix across connectors | validated; 30/30, kept as reference |
 | T02 | Sensor readings drop after scaling ingest workers | MQTT session takeover from a shared client id, runtime reproduction | validated; 10/10, kept as reference |
-| T02b | Same incident, restart durability stated in the prompt | stable ids across process restarts (new restart check) | next |
+| T02b | Same incident, restart durability stated in the prompt | stable ids across process restarts, verifying with a real restart | validated; **6/10, in band** |
 | T03 | Over-temperature alert never fires | unit mismatch in YAML mapping (config fix) | planned |
-| T04 | Duplicate work orders in MES after timeouts | retry without idempotency key | planned |
+| T04 | Duplicate work orders in MES after timeouts | retry without idempotency key, built on the T02b pattern | next |
 | T05 | ERP sync misses records above 1000 rows | cursor pagination off-by-one | planned |
 | R01 | Review an AI-drafted prompt and rubric for T04 | task review and correction | planned |
 
@@ -419,4 +451,4 @@ New tasks start from [`tasks/_template/`](tasks/_template).
 python3 scripts/make_figures.py
 ```
 
-The script reads both incident logs, the calibration `summary.json` files and one recorded transcript per task. It also re-runs `validate.py` and every negative control live, for both tasks. `docs/assets/task-lifecycle.svg` is the only hand-drawn figure.
+The script reads both incident logs, the calibration `summary.json` files and one recorded transcript per task. It also re-runs `validate.py` and every negative control live, for all three tasks. `docs/assets/task-lifecycle.svg` is the only hand-drawn figure.

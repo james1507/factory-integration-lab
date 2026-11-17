@@ -23,6 +23,7 @@ from validate import run_controls  # noqa: E402
 
 TASK = ROOT / "tasks" / "T01-webhook-401"
 TASK2 = ROOT / "tasks" / "T02-mqtt-ingest-gaps"
+TASK2B = ROOT / "tasks" / "T02b-mqtt-ingest-restart"
 OUT = ROOT / "docs" / "assets"
 FONT = "font-family='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace'"
 SANS = "font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif'"
@@ -89,8 +90,9 @@ BATCH_LABELS = {
     ("T01-webhook-401", "2026-11-17b"): "T01 B: v1, no docs, 23k log lines",
     ("T01-webhook-401", "2026-11-17c"): "T01 C: gateway v2, ERP trap",
     ("T02-mqtt-ingest-gaps", "2026-11-17"): "T02 A: client-id takeover loop",
+    ("T02b-mqtt-ingest-restart", "2026-11-17"): "T02b A: restart guarantee stated",
 }
-VERDICT = "Verdict: 40/40 across both tasks. Both are too easy for this model; see each task's calibration.md."
+VERDICT = "T01 and T02 are too easy (40/40). T02b lands at 6/10: the requirement is stated, but checking it needs a real restart."
 
 
 def t02_ingest_rate():
@@ -142,7 +144,7 @@ def t02_ingest_rate():
 
 def calibration():
     batches = []
-    for task in (TASK, TASK2):
+    for task in (TASK, TASK2, TASK2B):
         for f in sorted((task / "calibration").glob("runs-*/summary.json")):
             d = json.loads(f.read_text())
             runs = d["runs"]
@@ -254,7 +256,11 @@ def agent_run(run="runs-2026-11-17c/run-03", task=TASK, name="t01-agent-run.svg"
     lines += [(s, "#c9d1d9") for s in wrapped[:9]]
     grader = (d / "grader.log").read_text()
     lines.append(("", INK))
-    lines.append(("grader: %s" % ("PASS (all grader checks)" if "OK" in grader.splitlines()[-1] else "FAIL"), "#7ee787"))
+    if "OK" in grader.splitlines()[-1]:
+        lines.append(("grader: PASS (all grader checks)", "#7ee787"))
+    else:
+        failed = sorted(set(re.findall(r"^FAIL: test_(\w+?)_", grader, re.M)))
+        lines.append(("grader: FAIL (%s)" % ", ".join(x.upper() for x in failed), "#ff7b72"))
     terminal(name, "One recorded agent run (tool calls, answer, grade)", lines)
 
 
@@ -266,3 +272,5 @@ if __name__ == "__main__":
     validate_output(TASK2, "t02-validate.svg")
     agent_run()
     agent_run("runs-2026-11-17/run-01", TASK2, "t02-agent-run.svg")
+    validate_output(TASK2B, "t02b-validate.svg")
+    agent_run("runs-2026-11-17/run-10", TASK2B, "t02b-agent-run-fail.svg")

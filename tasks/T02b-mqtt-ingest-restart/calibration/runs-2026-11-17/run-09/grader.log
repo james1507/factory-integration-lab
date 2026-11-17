@@ -1,0 +1,14 @@
+/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/suite.py:163: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/t02-grade-pt7fezgd/ingest.log' mode='w' encoding='UTF-8'>
+  setUpClass()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+test_g1_all_readings_stored (grader.test_grader.T02b) ... ok
+test_g2_no_session_takeovers (grader.test_grader.T02b) ... ok
+test_g3_no_loss_across_broker_connection_drop (grader.test_grader.T02b) ... ok
+test_g4_three_workers_kept (grader.test_grader.T02b) ... ok
+test_g5_reconnect_reuses_session (grader.test_grader.T02b) ... ok
+test_g6_no_loss_across_process_restart (grader.test_grader.T02b) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 10.207s
+
+OK

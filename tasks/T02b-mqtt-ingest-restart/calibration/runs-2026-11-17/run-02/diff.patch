@@ -1,0 +1,106 @@
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/mqtt_client.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-02/ingest/mqtt_client.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/mqtt_client.py	2026-11-17 14:54:15
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-02/ingest/mqtt_client.py	2026-11-17 15:45:44
+@@ -1,13 +1,15 @@
+ """Minimal client for the plant broker (see tools/plant_sim/README.md for the wire format)."""
+ import json
+-import os
+ import socket
+ 
+ 
+-def default_client_id(prefix):
+-    # One stable id per ingest process, so the broker keeps our session (and
+-    # queues readings) across reconnects when clean_session is false.
+-    return "%s-%s-%d" % (prefix, socket.gethostname(), os.getpid())
++def default_client_id(prefix, worker_index):
++    # One id per worker connection: the broker treats a second CONNECT with an
++    # id that is already connected as a session takeover and closes the older
++    # connection, so workers must never share an id. The id must also stay the
++    # same across restarts (no pid), so a restarted worker reattaches to its
++    # persistent session and receives the readings queued while it was down.
++    return "%s-%s-w%d" % (prefix, socket.gethostname(), worker_index)
+ 
+ 
+ class BrokerClient:
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/worker.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-02/ingest/worker.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/ingest/worker.py	2026-11-17 14:54:16
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-02/ingest/worker.py	2026-11-17 15:45:44
+@@ -16,7 +16,7 @@
+         self.s = settings
+         self.store = store
+         self.stop_event = stop_event
+-        self.client_id = mqtt_client.default_client_id(settings.client_prefix)
++        self.client_id = mqtt_client.default_client_id(settings.client_prefix, index)
+         self.client = None
+ 
+     def topics(self):
+@@ -48,8 +48,11 @@
+                 self.client.close()
+ 
+     def handle(self, reading):
+-        if reading.get("line") not in self.lines:
+-            # Another worker owns this line; it will store the reading.
+-            log.debug("worker=%d skipping reading for line %s", self.index, reading.get("line"))
++        # A persistent session can still carry subscriptions (and queued
++        # readings) for lines this worker no longer owns, e.g. after the line
++        # assignment changed between releases. Store them anyway: the store
++        # drops duplicates by (line, seq), whereas skipping them loses them.
++        if reading.get("line") not in self.s.lines:
++            log.debug("worker=%d ignoring reading for unknown line %s", self.index, reading.get("line"))
+             return
+         self.store.insert(reading)
+diff -ru -x __pycache__ /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/tests/test_ingest.py /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-02/tests/test_ingest.py
+--- /Users/cmc-macmini/projects/factory-integration-lab/tasks/T02b-mqtt-ingest-restart/env/tests/test_ingest.py	2026-11-17 14:55:39
++++ /var/folders/7d/j58hwvpd4t3csmchy9y9kq600000gn/T/cal-ws-8q3h1oeh/ws-02/tests/test_ingest.py	2026-11-17 15:45:54
+@@ -63,6 +63,51 @@
+         broker.stop()
+         self.assertGreaterEqual(store.count(), len(pub.sent) * 0.99)
+ 
++    def test_three_workers_store_all_lines_without_takeovers(self):
++        broker = Broker().start()
++        tmp = tempfile.mkdtemp()
++        settings = Settings(write_ini(tmp, broker.port, workers=3))
++        stop = threading.Event()
++        store, _ = start(settings, stop)
++        time.sleep(0.3)
++        pub = Publisher(broker.port, rate=50)
++        pub.start()
++        time.sleep(1.5)
++        pub.stop()
++        time.sleep(0.5)
++        stop.set()
++        broker.stop()
++        self.assertEqual(broker.stats["takeovers"], 0)
++        for line in (1, 2, 3):
++            sent = sum(1 for l, _, _ in pub.sent if l == line)
++            self.assertGreaterEqual(store.count(line), sent * 0.99, "line %d" % line)
++
++    def test_readings_during_restart_are_not_lost(self):
++        broker = Broker().start()
++        tmp = tempfile.mkdtemp()
++        settings = Settings(write_ini(tmp, broker.port, workers=3))
++        stop1 = threading.Event()
++        _, workers1 = start(settings, stop1)
++        time.sleep(0.3)
++        pub = Publisher(broker.port, rate=50)
++        pub.start()
++        time.sleep(0.5)
++        # Rolling deploy: old process goes away, readings keep coming.
++        stop1.set()
++        for w in workers1:
++            w.client.close()
++            w.join(2)
++        time.sleep(0.7)
++        stop2 = threading.Event()
++        store, _ = start(settings, stop2)  # same db, same host, new process
++        time.sleep(0.5)
++        pub.stop()
++        time.sleep(0.5)
++        stop2.set()
++        broker.stop()
++        self.assertEqual(broker.stats["takeovers"], 0)
++        self.assertGreaterEqual(store.count(), len(pub.sent) * 0.99)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
